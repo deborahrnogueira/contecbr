@@ -21,7 +21,7 @@ def carregar_dados(uploaded_file):
             # Ler especificamente as colunas B até I, começando da linha 11
             df = pd.read_excel(
                 uploaded_file,
-                sheet_name='CURVA ABC',
+                sheet_name='ANALISE',
                 usecols='B:I',  # Específica as colunas B até I
                 skiprows=10,    # Pula as primeiras 10 linhas
             )
