@@ -4,15 +4,18 @@ import plotly.graph_objects as go
 import io
 
 def criar_curva_abc(df):
-    # Usar a coluna com espaços " TOTAL "
-    df = df.sort_values(' TOTAL ', ascending=False)
+    # Selecionar apenas as linhas 12 a 310
+    df = df.iloc[11:310].copy()
     
-    # Converter valor monetário para float
-    df[' TOTAL '] = df[' TOTAL '].str.replace('R$ ', '').str.replace('.', '').str.replace(',', '.').astype(float)
+    # Acessar a coluna TOTAL diretamente pela posição (coluna G = índice 6)
+    df['TOTAL'] = df.iloc[:, 6].str.replace('R\$ ', '').str.replace('.', '').str.replace(',', '.').astype(float)
+    
+    # Ordenar por valor total em ordem decrescente
+    df = df.sort_values('TOTAL', ascending=False)
     
     # Calcular percentuais
-    total_geral = df[' TOTAL '].sum()
-    df['INCIDÊNCIA DO ITEM (%)'] = (df[' TOTAL '] / total_geral) * 100
+    total_geral = df['TOTAL'].sum()
+    df['INCIDÊNCIA DO ITEM (%)'] = (df['TOTAL'] / total_geral) * 100
     df['INCIDÊNCIA ACUMULADA (%)'] = df['INCIDÊNCIA DO ITEM (%)'].cumsum()
     
     # Classificar
@@ -34,17 +37,46 @@ def main():
     
     if uploaded_file is not None:
         try:
-            # Ler arquivo da aba CURVA ABC
+            # Ler arquivo especificando a aba correta
             df = pd.read_excel(uploaded_file, sheet_name='CURVA ABC')
             
-            # Verificar colunas disponíveis
-            st.write("Colunas disponíveis:", df.columns.tolist())
+            # Listar colunas disponíveis para depuração
+            st.write("Colunas disponíveis na planilha:", df.columns.tolist())
             
             # Processar dados
             df_classificado = criar_curva_abc(df)
             
             st.subheader('Dados Classificados')
             st.dataframe(df_classificado)
+            
+            # Criar gráfico
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=list(range(len(df_classificado))),
+                y=df_classificado['INCIDÊNCIA ACUMULADA (%)'],
+                mode='lines',
+                name='Curva ABC'
+            ))
+            
+            fig.update_layout(
+                title='Curva ABC',
+                xaxis_title='Itens',
+                yaxis_title='Percentual Acumulado (%)'
+            )
+            
+            st.plotly_chart(fig)
+            
+            # Download dos resultados
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df_classificado.to_excel(writer, sheet_name='CURVA ABC', index=False)
+            
+            st.download_button(
+                label="Baixar Curva ABC",
+                data=output.getvalue(),
+                file_name="curva_abc_classificada.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
             
         except Exception as e:
             st.error(f'Erro ao processar arquivo: {str(e)}')
