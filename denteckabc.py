@@ -1,16 +1,3 @@
-import subprocess
-import sys
-
-# Instalar pacotes dinamicamente
-def instalar_pacotes():
-    try:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
-    except Exception as e:
-        print(f"Erro ao instalar pacotes: {e}")
-
-# Chamar a função antes de rodar o restante do código
-instalar_pacotes()
-
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
