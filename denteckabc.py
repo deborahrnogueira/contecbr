@@ -4,31 +4,31 @@ import plotly.graph_objects as go
 import io
 
 def criar_curva_abc(df):
-    # Selecionar apenas as linhas 12 a 310
-    df = df.iloc[11:310].copy()
-    
-    # Limpar e converter a coluna TOTAL
-    df[' TOTAL '] = df[' TOTAL '].str.replace('R$ ', '').str.replace('.', '').str.replace(',', '.').astype(float)
-    
-    # Ordenar por valor total em ordem decrescente
-    df = df.sort_values(' TOTAL ', ascending=False)
+    # Usar os dados da planilha fornecida
+    df = df.copy()
     
     # Calcular percentuais
-    total_geral = df[' TOTAL '].sum()
-    df['INCIDÊNCIA DO ITEM (%)'] = (df[' TOTAL '] / total_geral) * 100
-    df['INCIDÊNCIA ACUMULADA (%)'] = df['INCIDÊNCIA DO ITEM (%)'].cumsum()
+    total_geral = df[' TOTAL '].str.replace('R$ ', '').str.replace('.', '').str.replace(',', '.').astype(float).sum()
+    df['INCIDÊNCIA DO ITEM (%)'] = df[' TOTAL '].str.replace('R$ ', '').str.replace('.', '').str.replace(',', '.').astype(float) / total_geral * 100
+    
+    # Ordenar por incidência em ordem decrescente
+    df_ordenado = df.sort_values('INCIDÊNCIA DO ITEM (%)', ascending=False)
+    
+    # Calcular incidência acumulada
+    df_ordenado['INCIDÊNCIA ACUMULADA (%)'] = df_ordenado['INCIDÊNCIA DO ITEM (%)'].cumsum()
     
     # Classificar
-    def get_classe(acumulado):
-        if acumulado <= 80:
+    def classificar_abc(valor):
+        if valor <= 80:
             return 'A'
-        elif acumulado <= 95:
+        elif valor <= 95:
             return 'B'
         else:
             return 'C'
     
-    df['CLASSIFICAÇÃO'] = df['INCIDÊNCIA ACUMULADA (%)'].apply(get_classe)
-    return df
+    df_ordenado['CLASSIFICAÇÃO'] = df_ordenado['INCIDÊNCIA ACUMULADA (%)'].apply(classificar_abc)
+    
+    return df_ordenado
 
 def main():
     st.title('Análise Curva ABC')
@@ -37,25 +37,28 @@ def main():
     
     if uploaded_file is not None:
         try:
-            # Ler arquivo especificando a aba correta
+            # Ler arquivo da aba CURVA ABC
             df = pd.read_excel(uploaded_file, sheet_name='CURVA ABC')
             
+            # Verificar colunas
             if ' TOTAL ' not in df.columns:
-                st.error("Colunas disponíveis na planilha:")
+                st.error("Colunas disponíveis:")
                 st.write(df.columns.tolist())
                 return
-                
+            
+            # Processar dados
             df_classificado = criar_curva_abc(df)
             
+            # Mostrar resultados
             st.subheader('Dados Classificados')
             st.dataframe(df_classificado)
             
-            # Criar gráfico
+            # Criar gráfico da curva ABC
             fig = go.Figure()
             fig.add_trace(go.Scatter(
                 x=list(range(len(df_classificado))),
                 y=df_classificado['INCIDÊNCIA ACUMULADA (%)'],
-                mode='lines',
+                mode='lines+markers',
                 name='Curva ABC'
             ))
             
@@ -67,7 +70,7 @@ def main():
             
             st.plotly_chart(fig)
             
-            # Download
+            # Download dos resultados
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df_classificado.to_excel(writer, sheet_name='CURVA ABC', index=False)
@@ -81,6 +84,7 @@ def main():
             
         except Exception as e:
             st.error(f'Erro ao processar arquivo: {str(e)}')
+            st.write("Detalhes do erro:", e)
 
 if __name__ == '__main__':
     main()
