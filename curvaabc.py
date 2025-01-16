@@ -1,268 +1,274 @@
 import streamlit as st
 import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+import io
+from fpdf import FPDF
 import plotly.express as px
 import plotly.graph_objects as go
-import numpy as np
-from fpdf import FPDF
 from datetime import datetime
-import io
 
 # Configuração da página
 st.set_page_config(page_title="Análise Curva ABC", layout="wide")
 
-# Estilo do Streamlit
-st.markdown("""
-    <style>
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 24px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        padding: 10px 20px;
-    }
-    </style>
-""", unsafe_allow_html=True)
+# Funções auxiliares
+def formatar_moeda(valor):
+    """Formata valor para R$ com separadores de milhares"""
+    return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-# Função para validar o arquivo de entrada
-@st.cache_data
-def validate_file(uploaded_file):
+def validar_dados(df):
+    """Validação robusta dos dados de entrada"""
+    erros = []
+    
+    if df.empty:
+        erros.append("A planilha está vazia")
+    
+    colunas_necessarias = ['Item', 'DESCRIÇÃO', 'UND', 'QTD', 'TOTAL']
+    colunas_existentes = df.columns.tolist()
+    
+    for coluna in colunas_necessarias:
+        if coluna not in colunas_existentes:
+            erros.append(f"Coluna '{coluna}' não encontrada")
+    
+    if len(erros) > 0:
+        raise ValueError("\n".join(erros))
+    
+    return True
+
+def limpar_valor_monetario(valor):
+    """Limpa e converte valores monetários para float"""
+    if pd.isna(valor):
+        return 0.0
+    
+    if isinstance(valor, (int, float)):
+        return float(valor)
+    
     try:
-        if uploaded_file.name.endswith('.xlsx'):
-            df = pd.read_excel(uploaded_file, sheet_name='CURVA ABC')
-        elif uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file)
-        else:
-            df = pd.read_excel(uploaded_file)
-        
-        required_columns = ['Item', 'DESCRIÇÃO', 'UND', 'QTD', 'TOTAL']
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        
-        if missing_columns:
-            return False, f"Colunas ausentes: {', '.join(missing_columns)}"
-        
-        return True, df
-    except Exception as e:
-        return False, f"Erro ao ler arquivo: {str(e)}"
+        # Remove caracteres não numéricos exceto . e ,
+        valor_limpo = ''.join(c for c in str(valor) if c.isdigit() or c in '.,')
+        valor_limpo = valor_limpo.replace('.', '').replace(',', '.')
+        return float(valor_limpo)
+    except:
+        return 0.0
 
-# Função para processar os dados
 @st.cache_data
-def criar_curva_abc(df):
-    """Cria a análise da curva ABC a partir do DataFrame"""
+def processar_dados(df):
+    """Processa os dados e cria a análise ABC"""
     # Selecionar apenas as linhas relevantes
     df = df.iloc[11:310].copy()
     
-    # Converter coluna TOTAL para numérico, tratando diferentes formatos
-    df['TOTAL'] = df['TOTAL'].apply(lambda x: str(x) if pd.notnull(x) else "0")
-    df['TOTAL'] = df['TOTAL'].apply(lambda x: 
-        float(str(x).replace('R$', '').replace('.', '').replace(',', '.').strip())
-        if isinstance(x, (str, int, float)) else 0
-    )
+    # Converter coluna TOTAL para float
+    df['TOTAL'] = df.iloc[:, 6].apply(limpar_valor_monetario)
     
-    # Remover linhas com total zero ou NaN
+    # Remover linhas com total zero
     df = df[df['TOTAL'] > 0].reset_index(drop=True)
     
-    # Ordenar por valor total em ordem decrescente
-    df = df.sort_values('TOTAL', ascending=False)
+    # Ordenar por valor total
+    df = df.sort_values('TOTAL', ascending=False).reset_index(drop=True)
     
-    # Calcular percentuais
+    # Calcular métricas
     total_geral = df['TOTAL'].sum()
-    df['INCIDÊNCIA DO ITEM (%)'] = (df['TOTAL'] / total_geral) * 100
-    df['INCIDÊNCIA ACUMULADA (%)'] = df['INCIDÊNCIA DO ITEM (%)'].cumsum()
+    df['INCIDÊNCIA (%)'] = (df['TOTAL'] / total_geral * 100).round(2)
+    df['INCIDÊNCIA ACUMULADA (%)'] = df['INCIDÊNCIA (%)'].cumsum().round(2)
     
-    # Classificar em A, B ou C
-    conditions = [
-        df['INCIDÊNCIA ACUMULADA (%)'] <= 80,
-        df['INCIDÊNCIA ACUMULADA (%)'] <= 95
-    ]
-    choices = ['A', 'B']
-    df['CLASSIFICAÇÃO'] = np.select(conditions, choices, default='C')
+    # Classificar
+    df['CLASSIFICAÇÃO'] = df['INCIDÊNCIA ACUMULADA (%)'].apply(
+        lambda x: 'A' if x <= 80 else ('B' if x <= 95 else 'C'))
     
-    # Adicionar número do item
     df['NÚMERO DO ITEM'] = range(1, len(df) + 1)
     
     return df
 
-# Função para criar gráfico interativo com Plotly
-def criar_grafico_interativo(df):
-    # Gráfico de barras + linha
-    fig = go.Figure()
+def criar_graficos(df):
+    """Cria diferentes visualizações dos dados"""
+    graficos = {}
     
-    # Adicionar barras para cada classe
-    cores = {'A': 'blue', 'B': 'orange', 'C': 'green'}
-    for classe in ['A', 'B', 'C']:
-        mask = df['CLASSIFICAÇÃO'] == classe
-        fig.add_trace(go.Bar(
-            x=df[mask]['NÚMERO DO ITEM'],
-            y=df[mask]['INCIDÊNCIA DO ITEM (%)'],
-            name=f'Classe {classe}',
-            marker_color=cores[classe],
-            opacity=0.3,
-            hovertemplate="<b>Item %{x}</b><br>" +
-                         "Incidência: %{y:.2f}%<br>" +
-                         "Classe: " + classe + "<extra></extra>"
-        ))
-    
-    # Adicionar linha de incidência acumulada
-    fig.add_trace(go.Scatter(
+    # Gráfico de Pareto
+    fig_pareto = go.Figure()
+    fig_pareto.add_trace(go.Bar(
+        x=df['NÚMERO DO ITEM'],
+        y=df['INCIDÊNCIA (%)'],
+        name='Incidência',
+        marker_color=df['CLASSIFICAÇÃO'].map({'A': 'blue', 'B': 'orange', 'C': 'green'})
+    ))
+    fig_pareto.add_trace(go.Scatter(
         x=df['NÚMERO DO ITEM'],
         y=df['INCIDÊNCIA ACUMULADA (%)'],
-        name='Incidência Acumulada',
+        name='Acumulado',
         line=dict(color='red', width=2),
-        hovertemplate="<b>Item %{x}</b><br>" +
-                     "Incidência Acumulada: %{y:.2f}%<extra></extra>"
+        yaxis='y2'
     ))
-    
-    # Adicionar linhas de referência
-    fig.add_hline(y=80, line_dash="dash", line_color="red", opacity=0.5)
-    fig.add_hline(y=95, line_dash="dash", line_color="orange", opacity=0.5)
-    
-    fig.update_layout(
-        title='Curva ABC com Distribuição de Itens',
-        xaxis_title='Número de Itens',
+    fig_pareto.update_layout(
+        title='Curva ABC (Pareto)',
+        xaxis_title='Número do Item',
         yaxis_title='Incidência (%)',
-        hovermode='x unified',
+        yaxis2=dict(
+            title='Acumulado (%)',
+            overlaying='y',
+            side='right'
+        ),
         showlegend=True
     )
+    graficos['pareto'] = fig_pareto
     
-    return fig
-
-# Função para criar gráfico de pizza
-def criar_grafico_pizza(df):
-    resumo = df.groupby('CLASSIFICAÇÃO').agg({
+    # Gráfico de Pizza
+    resumo_classes = df.groupby('CLASSIFICAÇÃO').agg({
         'TOTAL': 'sum',
         'NÚMERO DO ITEM': 'count'
     }).reset_index()
     
-    fig = px.pie(
-        resumo,
+    fig_pizza = px.pie(
+        resumo_classes,
         values='TOTAL',
         names='CLASSIFICAÇÃO',
         title='Distribuição por Classe',
-        hover_data=['NÚMERO DO ITEM'],
-        labels={'NÚMERO DO ITEM': 'Quantidade de Itens'}
+        hover_data=['NÚMERO DO ITEM']
     )
-    return fig
+    graficos['pizza'] = fig_pizza
+    
+    # Heatmap
+    matriz_heatmap = df.pivot_table(
+        values='TOTAL',
+        index='CLASSIFICAÇÃO',
+        aggfunc=['count', 'sum', 'mean']
+    )
+    
+    fig_heatmap = px.imshow(
+        matriz_heatmap,
+        title='Heatmap de Valores por Classe',
+        labels=dict(x='Métricas', y='Classe', color='Valor')
+    )
+    graficos['heatmap'] = fig_heatmap
+    
+    return graficos
 
-# Função para criar tabela de distribuição
-def criar_tabela_distribuicao(df):
+def gerar_pdf(df, graficos):
+    """Gera relatório PDF com análises"""
+    pdf = FPDF()
+    pdf.add_page()
+    
+    # Cabeçalho
+    pdf.set_font('Arial', 'B', 16)
+    pdf.cell(0, 10, 'Relatório de Análise Curva ABC', ln=True, align='C')
+    pdf.ln(10)
+    
+    # Sumário Executivo
+    pdf.set_font('Arial', 'B', 12)
+    pdf.cell(0, 10, 'Sumário Executivo', ln=True)
+    pdf.set_font('Arial', '', 10)
+    
     resumo = df.groupby('CLASSIFICAÇÃO').agg({
-        'TOTAL': ['sum', 'count'],
-        'INCIDÊNCIA DO ITEM (%)': 'sum'
+        'TOTAL': ['count', 'sum', lambda x: (x.sum() / df['TOTAL'].sum() * 100)],
     }).round(2)
     
-    resumo.columns = ['Valor Total', 'Quantidade', 'Incidência (%)']
-    resumo = resumo.reset_index()
+    for classe in ['A', 'B', 'C']:
+        dados_classe = resumo.loc[classe]
+        pdf.multi_cell(0, 5, f"""
+        Classe {classe}:
+        - Quantidade de itens: {dados_classe[('TOTAL', 'count')]}
+        - Valor total: {formatar_moeda(dados_classe[('TOTAL', 'sum')])}
+        - Percentual do valor total: {dados_classe[('TOTAL', '<lambda_0>')]}%
+        """)
     
-    # Formatação dos valores
-    resumo['Valor Total'] = resumo['Valor Total'].apply(
-        lambda x: f"R$ {x:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
-    )
-    
-    return resumo
+    return pdf
 
 def main():
     # Sidebar
-    with st.sidebar:
-        st.title('Configurações')
-        st.markdown('### Filtros')
-        
-        # Placeholder para filtros
-        st.markdown('#### Será aplicado aos dados carregados')
+    st.sidebar.title('Configurações')
     
-    # Tabs principais
-    tabs = st.tabs(['Upload & Análise', 'Visualizações', 'Relatório', 'Documentação'])
+    # Área de upload
+    formatos_aceitos = ['xlsx', 'xls', 'csv']
+    tipo_arquivo = st.sidebar.selectbox('Formato do arquivo', formatos_aceitos)
+    uploaded_file = st.file_uploader(f"Carregue o arquivo ({', '.join(formatos_aceitos)})", type=formatos_aceitos)
     
-    with tabs[0]:
-        st.title('Análise Curva ABC')
-        
-        # Upload de arquivo
-        uploaded_file = st.file_uploader(
-            "Carregue a planilha (Excel ou CSV)",
-            type=['xlsx', 'csv', 'xls']
-        )
-        
-        if uploaded_file is not None:
-            # Validar arquivo
-            is_valid, result = validate_file(uploaded_file)
-            
-            if not is_valid:
-                st.error(result)
+    if uploaded_file is not None:
+        try:
+            # Carregar dados
+            if tipo_arquivo in ['xlsx', 'xls']:
+                df = pd.read_excel(uploaded_file, sheet_name='CURVA ABC')
             else:
-                df = result
-                df_classificado = criar_curva_abc(df)
+                df = pd.read_csv(uploaded_file)
+            
+            # Validar e processar dados
+            validar_dados(df)
+            df_processado = processar_dados(df)
+            
+            # Interface principal com abas
+            tab1, tab2, tab3, tab4 = st.tabs(['Visão Geral', 'Análise Detalhada', 'Filtros', 'Relatório'])
+            
+            # Aba 1: Visão Geral
+            with tab1:
+                graficos = criar_graficos(df_processado)
                 
-                # Interface principal
-                col1, col2 = st.columns([2, 1])
-                
+                col1, col2 = st.columns(2)
                 with col1:
-                    st.subheader('Gráfico da Curva ABC')
-                    fig_curva = criar_grafico_interativo(df_classificado)
-                    st.plotly_chart(fig_curva, use_container_width=True)
+                    st.plotly_chart(graficos['pareto'], use_container_width=True)
+                with col2:
+                    st.plotly_chart(graficos['pizza'], use_container_width=True)
+                
+                st.plotly_chart(graficos['heatmap'], use_container_width=True)
+            
+            # Aba 2: Análise Detalhada
+            with tab2:
+                st.dataframe(df_processado)
+            
+            # Aba 3: Filtros
+            with tab3:
+                col1, col2 = st.columns(2)
+                with col1:
+                    classes_selecionadas = st.multiselect(
+                        'Filtrar por classe',
+                        ['A', 'B', 'C'],
+                        default=['A', 'B', 'C']
+                    )
                 
                 with col2:
-                    st.subheader('Resumo da Classificação')
-                    resumo_table = criar_tabela_distribuicao(df_classificado)
-                    st.dataframe(resumo_table, hide_index=True)
-    
-    with tabs[1]:
-        if 'df_classificado' in locals():
-            st.subheader('Visualizações Adicionais')
+                    valor_min, valor_max = st.slider(
+                        'Faixa de valores',
+                        float(df_processado['TOTAL'].min()),
+                        float(df_processado['TOTAL'].max()),
+                        (float(df_processado['TOTAL'].min()), float(df_processado['TOTAL'].max()))
+                    )
+                
+                busca = st.text_input('Buscar por descrição')
+                
+                df_filtrado = df_processado[
+                    (df_processado['CLASSIFICAÇÃO'].isin(classes_selecionadas)) &
+                    (df_processado['TOTAL'] >= valor_min) &
+                    (df_processado['TOTAL'] <= valor_max)
+                ]
+                
+                if busca:
+                    df_filtrado = df_filtrado[
+                        df_filtrado['DESCRIÇÃO'].str.contains(busca, case=False, na=False)
+                    ]
+                
+                st.dataframe(df_filtrado)
             
-            viz_type = st.selectbox(
-                'Selecione o tipo de visualização',
-                ['Gráfico de Pizza', 'Dados Detalhados', 'Todos']
-            )
+            # Aba 4: Relatório
+            with tab4:
+                if st.button('Gerar Relatório PDF'):
+                    pdf = gerar_pdf(df_processado, graficos)
+                    pdf_output = pdf.output(dest='S').encode('latin1')
+                    st.download_button(
+                        label="📥 Baixar Relatório PDF",
+                        data=pdf_output,
+                        file_name=f"relatorio_curva_abc_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                        mime="application/pdf"
+                    )
             
-            if viz_type in ['Gráfico de Pizza', 'Todos']:
-                st.plotly_chart(criar_grafico_pizza(df_classificado))
-            
-            if viz_type in ['Dados Detalhados', 'Todos']:
-                st.dataframe(
-                    df_classificado.style.format({
-                        'TOTAL': 'R$ {:,.2f}'.format,
-                        'INCIDÊNCIA DO ITEM (%)': '{:.2f}%'.format,
-                        'INCIDÊNCIA ACUMULADA (%)': '{:.2f}%'.format
-                    })
-                )
-    
-    with tabs[2]:
-        if 'df_classificado' in locals():
-            st.subheader('Exportar Dados')
-            
-            # Preparar dados para exportação
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df_classificado.to_excel(writer, sheet_name='CURVA ABC', index=False)
-            
-            st.download_button(
-                label="📥 Baixar Análise em Excel",
-                data=output.getvalue(),
-                file_name="analise_curva_abc.xlsx",
+            # Botões de download
+            st.sidebar.download_button(
+                label="📥 Baixar Dados Processados (Excel)",
+                data=df_processado.to_excel(index=False).getvalue(),
+                file_name="curva_abc_processada.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-    
-    with tabs[3]:
-        st.subheader('Documentação')
-        st.markdown("""
-        ### Guia de Uso
-        
-        1. **Upload de Dados**
-           - Formatos aceitos: Excel (.xlsx, .xls) e CSV
-           - A planilha deve conter as colunas: Item, DESCRIÇÃO, UND, QTD, TOTAL
-        
-        2. **Interpretação dos Resultados**
-           - **Classe A**: Itens mais importantes (80% do valor acumulado)
-           - **Classe B**: Itens de importância intermediária (15% do valor acumulado)
-           - **Classe C**: Itens menos importantes (5% do valor acumulado)
-        
-        3. **Visualizações**
-           - **Curva ABC**: Mostra a distribuição dos itens e sua importância relativa
-           - **Gráfico de Pizza**: Apresenta a proporção de cada classe
-           - **Dados Detalhados**: Mostra todos os itens com suas classificações
-        
-        4. **Exportação**
-           - Permite baixar todos os dados em formato Excel
-           - Inclui todas as análises e classificações
-        """)
+            
+        except Exception as e:
+            st.error(f'Erro ao processar arquivo: {str(e)}')
+            st.info('Verifique se o arquivo está no formato correto e contém todos os dados necessários.')
 
 if __name__ == '__main__':
     main()
