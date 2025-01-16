@@ -24,10 +24,12 @@ def validar_dados(df):
     if df.empty:
         erros.append("A planilha está vazia")
     
-    colunas_necessarias = ['Item', 'DESCRIÇÃO', 'UND', 'QTD', 'TOTAL']
-    colunas_existentes = df.columns.tolist()
+    colunas_esperadas = ['ITEM', 'SIGLA', 'DESCRIÇÃO', 'UND', 'QTD', 'TOTAL', 
+                        'INCIDÊNCIA DO ITEM (%)', 'INCIDÊNCIA DO ITEM (%) ACUMULADO']
     
-    for coluna in colunas_necessarias:
+    # Verificar se todas as colunas necessárias existem
+    colunas_existentes = df.columns.tolist()
+    for coluna in colunas_esperadas:
         if coluna not in colunas_existentes:
             erros.append(f"Coluna '{coluna}' não encontrada")
     
@@ -55,30 +57,42 @@ def limpar_valor_monetario(valor):
 @st.cache_data
 def processar_dados(df):
     """Processa os dados e cria a análise ABC"""
-    # Selecionar apenas as linhas relevantes
-    df = df.iloc[11:310].copy()
-    
-    # Converter coluna TOTAL para float
-    df['TOTAL'] = df.iloc[:, 6].apply(limpar_valor_monetario)
-    
-    # Remover linhas com total zero
-    df = df[df['TOTAL'] > 0].reset_index(drop=True)
-    
-    # Ordenar por valor total
-    df = df.sort_values('TOTAL', ascending=False).reset_index(drop=True)
-    
-    # Calcular métricas
-    total_geral = df['TOTAL'].sum()
-    df['INCIDÊNCIA (%)'] = (df['TOTAL'] / total_geral * 100).round(2)
-    df['INCIDÊNCIA ACUMULADA (%)'] = df['INCIDÊNCIA (%)'].cumsum().round(2)
-    
-    # Classificar
-    df['CLASSIFICAÇÃO'] = df['INCIDÊNCIA ACUMULADA (%)'].apply(
-        lambda x: 'A' if x <= 80 else ('B' if x <= 95 else 'C'))
-    
-    df['NÚMERO DO ITEM'] = range(1, len(df) + 1)
-    
-    return df
+    try:
+        # Criar cópia do DataFrame
+        df_processado = df.copy()
+        
+        # Garantir que TOTAL seja numérico
+        df_processado['TOTAL'] = df_processado['TOTAL'].apply(limpar_valor_monetario)
+        
+        # Remover linhas com total zero
+        df_processado = df_processado[df_processado['TOTAL'] > 0].reset_index(drop=True)
+        
+        # Ordenar por valor total
+        df_processado = df_processado.sort_values('TOTAL', ascending=False).reset_index(drop=True)
+        
+        # Calcular métricas se não existirem
+        total_geral = df_processado['TOTAL'].sum()
+        
+        if 'INCIDÊNCIA DO ITEM (%)' not in df_processado.columns:
+            df_processado['INCIDÊNCIA DO ITEM (%)'] = (df_processado['TOTAL'] / total_geral * 100).round(2)
+        
+        if 'INCIDÊNCIA DO ITEM (%) ACUMULADO' not in df_processado.columns:
+            df_processado['INCIDÊNCIA DO ITEM (%) ACUMULADO'] = df_processado['INCIDÊNCIA DO ITEM (%)'].cumsum().round(2)
+        
+        # Classificar itens
+        df_processado['CLASSIFICAÇÃO'] = df_processado['INCIDÊNCIA DO ITEM (%) ACUMULADO'].apply(
+            lambda x: 'A' if x <= 80 else ('B' if x <= 95 else 'C'))
+        
+        # Adicionar número do item
+        df_processado['NÚMERO DO ITEM'] = range(1, len(df_processado) + 1)
+        
+        # Formatar valores monetários para exibição
+        df_processado['TOTAL_FORMATADO'] = df_processado['TOTAL'].apply(formatar_moeda)
+        
+        return df_processado
+        
+    except Exception as e:
+        raise Exception(f"Erro ao processar dados: {str(e)}")
 
 def criar_graficos(df):
     """Cria diferentes visualizações dos dados"""
@@ -86,64 +100,108 @@ def criar_graficos(df):
     
     # Gráfico de Pareto
     fig_pareto = go.Figure()
+    
+    # Barras de incidência individual
     fig_pareto.add_trace(go.Bar(
         x=df['NÚMERO DO ITEM'],
-        y=df['INCIDÊNCIA (%)'],
+        y=df['INCIDÊNCIA DO ITEM (%)'],
         name='Incidência',
-        marker_color=df['CLASSIFICAÇÃO'].map({'A': 'blue', 'B': 'orange', 'C': 'green'})
+        marker_color=df['CLASSIFICAÇÃO'].map({'A': 'blue', 'B': 'orange', 'C': 'green'}),
+        hovertemplate="<b>Item %{x}</b><br>" +
+                     "Incidência: %{y:.2f}%<br>" +
+                     "Valor: %{customdata}<br>" +
+                     "Classificação: %{text}<extra></extra>",
+        text=df['CLASSIFICAÇÃO'],
+        customdata=df['TOTAL_FORMATADO']
     ))
+    
+    # Linha de acumulado
     fig_pareto.add_trace(go.Scatter(
         x=df['NÚMERO DO ITEM'],
-        y=df['INCIDÊNCIA ACUMULADA (%)'],
+        y=df['INCIDÊNCIA DO ITEM (%) ACUMULADO'],
         name='Acumulado',
         line=dict(color='red', width=2),
-        yaxis='y2'
+        yaxis='y2',
+        hovertemplate="<b>Item %{x}</b><br>" +
+                     "Acumulado: %{y:.2f}%<extra></extra>"
     ))
+    
+    # Linhas de referência
+    fig_pareto.add_hline(y=80, line_dash="dash", line_color="red", opacity=0.5,
+                        annotation_text="Limite A (80%)", annotation_position="right")
+    fig_pareto.add_hline(y=95, line_dash="dash", line_color="orange", opacity=0.5,
+                        annotation_text="Limite B (95%)", annotation_position="right")
+    
     fig_pareto.update_layout(
         title='Curva ABC (Pareto)',
         xaxis_title='Número do Item',
-        yaxis_title='Incidência (%)',
+        yaxis_title='Incidência Individual (%)',
         yaxis2=dict(
-            title='Acumulado (%)',
+            title='Incidência Acumulada (%)',
             overlaying='y',
             side='right'
         ),
-        showlegend=True
+        showlegend=True,
+        hovermode='x unified'
     )
     graficos['pareto'] = fig_pareto
     
     # Gráfico de Pizza
     resumo_classes = df.groupby('CLASSIFICAÇÃO').agg({
         'TOTAL': 'sum',
-        'NÚMERO DO ITEM': 'count'
+        'ITEM': 'count'
     }).reset_index()
+    
+    resumo_classes['Percentual'] = (resumo_classes['TOTAL'] / resumo_classes['TOTAL'].sum() * 100).round(2)
+    resumo_classes['TOTAL_FORMATADO'] = resumo_classes['TOTAL'].apply(formatar_moeda)
     
     fig_pizza = px.pie(
         resumo_classes,
         values='TOTAL',
         names='CLASSIFICAÇÃO',
-        title='Distribuição por Classe',
-        hover_data=['NÚMERO DO ITEM']
+        title='Distribuição do Valor Total por Classe',
+        hover_data=['ITEM', 'Percentual', 'TOTAL_FORMATADO'],
+        custom_data=['TOTAL_FORMATADO', 'ITEM', 'Percentual']
     )
+    
+    fig_pizza.update_traces(
+        hovertemplate="<b>Classe %{label}</b><br>" +
+                     "Valor Total: %{customdata[0]}<br>" +
+                     "Quantidade de Itens: %{customdata[1]}<br>" +
+                     "Percentual: %{customdata[2]:.2f}%<extra></extra>"
+    )
+    
     graficos['pizza'] = fig_pizza
     
     # Heatmap
-    matriz_heatmap = df.pivot_table(
-        values='TOTAL',
-        index='CLASSIFICAÇÃO',
-        aggfunc=['count', 'sum', 'mean']
+    heatmap_data = pd.DataFrame({
+        'Classe': ['A', 'B', 'C'],
+        'Qtd_Itens': df.groupby('CLASSIFICAÇÃO')['ITEM'].count(),
+        'Valor_Total': df.groupby('CLASSIFICAÇÃO')['TOTAL'].sum(),
+        'Valor_Medio': df.groupby('CLASSIFICAÇÃO')['TOTAL'].mean()
+    }).round(2)
+    
+    fig_heatmap = go.Figure(data=go.Heatmap(
+        z=[heatmap_data['Qtd_Itens'],
+           heatmap_data['Valor_Total'],
+           heatmap_data['Valor_Medio']],
+        x=['A', 'B', 'C'],
+        y=['Quantidade de Itens', 'Valor Total', 'Valor Médio'],
+        hoverongaps=False,
+        colorscale='Blues'
+    ))
+    
+    fig_heatmap.update_layout(
+        title='Heatmap de Métricas por Classe',
+        xaxis_title='Classe',
+        yaxis_title='Métrica'
     )
     
-    fig_heatmap = px.imshow(
-        matriz_heatmap,
-        title='Heatmap de Valores por Classe',
-        labels=dict(x='Métricas', y='Classe', color='Valor')
-    )
     graficos['heatmap'] = fig_heatmap
     
     return graficos
 
-def gerar_pdf(df, graficos):
+def gerar_relatorio_pdf(df):
     """Gera relatório PDF com análises"""
     pdf = FPDF()
     pdf.add_page()
@@ -158,17 +216,18 @@ def gerar_pdf(df, graficos):
     pdf.cell(0, 10, 'Sumário Executivo', ln=True)
     pdf.set_font('Arial', '', 10)
     
-    resumo = df.groupby('CLASSIFICAÇÃO').agg({
-        'TOTAL': ['count', 'sum', lambda x: (x.sum() / df['TOTAL'].sum() * 100)],
-    }).round(2)
-    
+    # Análise por classe
     for classe in ['A', 'B', 'C']:
-        dados_classe = resumo.loc[classe]
+        df_classe = df[df['CLASSIFICAÇÃO'] == classe]
+        qtd_itens = len(df_classe)
+        valor_total = df_classe['TOTAL'].sum()
+        percentual = (valor_total / df['TOTAL'].sum() * 100)
+        
         pdf.multi_cell(0, 5, f"""
         Classe {classe}:
-        - Quantidade de itens: {dados_classe[('TOTAL', 'count')]}
-        - Valor total: {formatar_moeda(dados_classe[('TOTAL', 'sum')])}
-        - Percentual do valor total: {dados_classe[('TOTAL', '<lambda_0>')]}%
+        - Quantidade de itens: {qtd_itens}
+        - Valor total: {formatar_moeda(valor_total)}
+        - Percentual do valor total: {percentual:.2f}%
         """)
     
     return pdf
@@ -177,21 +236,18 @@ def main():
     # Sidebar
     st.sidebar.title('Configurações')
     
-    # Área de upload
-    formatos_aceitos = ['xlsx', 'xls', 'csv']
-    tipo_arquivo = st.sidebar.selectbox('Formato do arquivo', formatos_aceitos)
-    uploaded_file = st.file_uploader(f"Carregue o arquivo ({', '.join(formatos_aceitos)})", type=formatos_aceitos)
+    # Upload do arquivo
+    uploaded_file = st.sidebar.file_uploader("Carregue a planilha Excel", type=['xlsx'])
     
     if uploaded_file is not None:
         try:
-            # Carregar dados
-            if tipo_arquivo in ['xlsx', 'xls']:
-                df = pd.read_excel(uploaded_file, sheet_name='CURVA ABC')
-            else:
-                df = pd.read_csv(uploaded_file)
+            # Ler o arquivo Excel
+            df = pd.read_excel(uploaded_file, sheet_name='CURVA ABC')
             
-            # Validar e processar dados
+            # Validar dados
             validar_dados(df)
+            
+            # Processar dados
             df_processado = processar_dados(df)
             
             # Interface principal com abas
@@ -208,6 +264,15 @@ def main():
                     st.plotly_chart(graficos['pizza'], use_container_width=True)
                 
                 st.plotly_chart(graficos['heatmap'], use_container_width=True)
+                
+                # Resumo
+                st.subheader('Resumo por Classe')
+                resumo = df_processado.groupby('CLASSIFICAÇÃO').agg({
+                    'ITEM': 'count',
+                    'TOTAL': ['sum', 'mean']
+                }).round(2)
+                resumo.columns = ['Quantidade de Itens', 'Valor Total', 'Valor Médio']
+                st.dataframe(resumo)
             
             # Aba 2: Análise Detalhada
             with tab2:
@@ -249,7 +314,7 @@ def main():
             # Aba 4: Relatório
             with tab4:
                 if st.button('Gerar Relatório PDF'):
-                    pdf = gerar_pdf(df_processado, graficos)
+                    pdf = gerar_relatorio_pdf(df_processado)
                     pdf_output = pdf.output(dest='S').encode('latin1')
                     st.download_button(
                         label="📥 Baixar Relatório PDF",
