@@ -8,7 +8,7 @@ def criar_curva_abc(df):
     df = df.iloc[11:310].copy()
     
     # Acessar a coluna TOTAL diretamente pela posição (coluna G = índice 6)
-    df['TOTAL'] = df.iloc[:, 6].str.replace('R\$ ', '').str.replace('.', '').str.replace(',', '.').astype(float)
+    df['TOTAL'] = df.iloc[:, 6].str.replace('R$ ', '').str.replace('.', '').str.replace(',', '.').astype(float)
     
     # Ordenar por valor total em ordem decrescente
     df = df.sort_values('TOTAL', ascending=False)
@@ -40,21 +40,18 @@ def main():
             # Ler arquivo especificando a aba correta
             df = pd.read_excel(uploaded_file, sheet_name='CURVA ABC')
             
-            # Listar colunas disponíveis para depuração
-            st.write("Colunas disponíveis na planilha:", df.columns.tolist())
-            
             # Processar dados
             df_classificado = criar_curva_abc(df)
             
             st.subheader('Dados Classificados')
             st.dataframe(df_classificado)
             
-            # Criar gráfico
+            # Criar gráfico da curva ABC
             fig = go.Figure()
             fig.add_trace(go.Scatter(
                 x=list(range(len(df_classificado))),
                 y=df_classificado['INCIDÊNCIA ACUMULADA (%)'],
-                mode='lines',
+                mode='lines+markers',
                 name='Curva ABC'
             ))
             
@@ -66,7 +63,7 @@ def main():
             
             st.plotly_chart(fig)
             
-            # Download dos resultados
+            # Download dos resultados classificados
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df_classificado.to_excel(writer, sheet_name='CURVA ABC', index=False)
