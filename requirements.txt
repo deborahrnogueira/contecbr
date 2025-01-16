@@ -2,3 +2,4 @@ streamlit==1.24.0
 pandas==2.0.3
 plotly==5.15.0
 openpyxl==3.1.2
+pillow==9.5.0  # Specify a compatible version of Pillow
