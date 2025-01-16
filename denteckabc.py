@@ -1,10 +1,8 @@
+import streamlit as st
 import pandas as pd
-import openpyxl
+import plotly.graph_objects as go
 
-def criar_curva_abc(arquivo_entrada, arquivo_saida):
-    # Importar dados do Excel
-    df = pd.read_excel(arquivo_entrada, sheet_name='CURVA ABC')
-    
+def criar_curva_abc(df):
     # Ordenar por INCIDÊNCIA DO ITEM (%) em ordem decrescente
     df = df.sort_values('INCIDÊNCIA DO ITEM (%)', ascending=False)
     
@@ -20,29 +18,53 @@ def criar_curva_abc(arquivo_entrada, arquivo_saida):
         else:
             return 'C'
     
-    # Aplicar classificação
     df['CLASSIFICAÇÃO'] = df['INCIDÊNCIA ACUMULADA (%)'].apply(classificar_abc)
-    
-    # Exportar para Excel
-    df.to_excel(arquivo_saida, sheet_name='CURVA ABC', index=False)
-    
-    # Formatar planilha
-    wb = openpyxl.load_workbook(arquivo_saida)
-    ws = wb['CURVA ABC']
-    
-    # Ajustar largura das colunas
-    for col in ws.columns:
-        max_length = 0
-        column = col[0].column_letter
-        for cell in col:
-            if len(str(cell.value)) > max_length:
-                max_length = len(str(cell.value))
-        ws.column_dimensions[column].width = max_length + 2
-    
-    wb.save(arquivo_saida)
+    return df
 
-# Uso do programa
-arquivo_entrada = 'planilha_original.xlsx'
-arquivo_saida = 'curva_abc_classificada.xlsx'
+def main():
+    st.title('Análise Curva ABC')
+    
+    # Upload do arquivo
+    uploaded_file = st.file_uploader("Escolha o arquivo Excel", type=['xlsx'])
+    
+    if uploaded_file is not None:
+        # Ler dados
+        df = pd.read_excel(uploaded_file)
+        
+        # Criar curva ABC
+        df_classificado = criar_curva_abc(df)
+        
+        # Mostrar resultados
+        st.subheader('Dados Classificados')
+        st.dataframe(df_classificado)
+        
+        # Criar gráfico
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=list(range(len(df_classificado))),
+            y=df_classificado['INCIDÊNCIA ACUMULADA (%)'],
+            mode='lines',
+            name='Curva ABC'
+        ))
+        
+        fig.update_layout(
+            title='Curva ABC',
+            xaxis_title='Itens',
+            yaxis_title='Percentual Acumulado (%)',
+            showlegend=True
+        )
+        
+        st.plotly_chart(fig)
+        
+        # Download do resultado
+        csv = df_classificado.to_csv(index=False)
+        st.download_button(
+            label="Download dados classificados",
+            data=csv,
+            file_name="curva_abc_classificada.csv",
+            mime="text/csv"
+        )
 
-criar_curva_abc(arquivo_entrada, arquivo_saida)
+if __name__ == '__main__':
+    main()
+
