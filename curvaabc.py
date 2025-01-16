@@ -1,85 +1,69 @@
-import csv
-import matplotlib.pyplot as plt
-from openpyxl import Workbook
-import io
 import streamlit as st
+import pandas as pd
+import matplotlib.pyplot as plt
+import io
 
-def criar_curva_abc(dados):
-    # Processar os dados da coluna TOTAL (coluna G = índice 6)
-    for linha in dados:
-        linha['TOTAL'] = float(linha['TOTAL'].replace('R$ ', '').replace('.', '').replace(',', '.'))
-    
-    # Ordenar os dados pelo TOTAL em ordem decrescente
-    dados.sort(key=lambda x: x['TOTAL'], reverse=True)
-    
-    # Calcular percentuais e acumulados
-    total_geral = sum(linha['TOTAL'] for linha in dados)
-    acumulado = 0
-    for linha in dados:
-        linha['INCIDÊNCIA DO ITEM (%)'] = (linha['TOTAL'] / total_geral) * 100
-        acumulado += linha['INCIDÊNCIA DO ITEM (%)']
-        linha['INCIDÊNCIA ACUMULADA (%)'] = acumulado
-        
-        # Classificar em A, B ou C
+def criar_curva_abc(df):
+    # Selecionar apenas as linhas 12 a 310
+    df = df.iloc[11:310].copy()
+
+    # Limpar e converter a coluna TOTAL (coluna G) para float
+    df['TOTAL'] = df.iloc[:, 5].str.replace('R\$ ', '').str.replace('.', '').str.replace(',', '.').astype(float)
+
+    # Ordenar por valor total em ordem decrescente
+    df = df.sort_values('TOTAL', ascending=False)
+
+    # Calcular percentuais
+    total_geral = df['TOTAL'].sum()
+    df['INCIDÊNCIA DO ITEM (%)'] = (df['TOTAL'] / total_geral) * 100
+    df['INCIDÊNCIA ACUMULADA (%)'] = df['INCIDÊNCIA DO ITEM (%)'].cumsum()
+
+    # Classificar em A, B ou C
+    def get_classe(acumulado):
         if acumulado <= 80:
-            linha['CLASSIFICAÇÃO'] = 'A'
+            return 'A'
         elif acumulado <= 95:
-            linha['CLASSIFICAÇÃO'] = 'B'
+            return 'B'
         else:
-            linha['CLASSIFICAÇÃO'] = 'C'
-    
-    return dados
+            return 'C'
+
+    df['CLASSIFICAÇÃO'] = df['INCIDÊNCIA ACUMULADA (%)'].apply(get_classe)
+    return df
 
 def main():
     st.title('Análise Curva ABC')
 
-    uploaded_file = st.file_uploader("Carregue a planilha CSV", type=['csv'])
-    
+    uploaded_file = st.file_uploader("Carregue a planilha Excel", type=['xlsx'])
+
     if uploaded_file is not None:
         try:
-            # Ler o arquivo CSV
-            dados = []
-            with io.TextIOWrapper(uploaded_file, encoding='utf-8') as f:
-                leitor_csv = csv.DictReader(f, delimiter='\t')
-                for linha in leitor_csv:
-                    dados.append(linha)
+            # Ler o arquivo Excel especificando a aba correta
+            df = pd.read_excel(uploaded_file, sheet_name='CURVA ABC')
 
             # Processar os dados e criar a curva ABC
-            dados_classificados = criar_curva_abc(dados)
-            
+            df_classificado = criar_curva_abc(df)
+
             # Exibir os resultados em uma tabela
             st.subheader('Dados Classificados')
-            st.write(dados_classificados)
-            
+            st.dataframe(df_classificado)
+
             # Criar gráfico da curva ABC
-            incidencias_acumuladas = [linha['INCIDÊNCIA ACUMULADA (%)'] for linha in dados_classificados]
             plt.figure(figsize=(10, 6))
-            plt.plot(incidencias_acumuladas, marker='o', label="Curva ABC")
+            plt.plot(df_classificado['INCIDÊNCIA ACUMULADA (%)'], marker='o', label="Curva ABC")
             plt.title('Curva ABC')
             plt.xlabel('Itens')
             plt.ylabel('Incidência Acumulada (%)')
             plt.grid()
             plt.legend()
-            
+
             # Exibir o gráfico no Streamlit
             st.pyplot(plt)
-            
+
             # Exportar os resultados para Excel
             output = io.BytesIO()
-            wb = Workbook()
-            ws = wb.active
-            ws.title = "CURVA ABC"
-            
-            # Adicionar cabeçalhos ao Excel
-            cabecalhos = list(dados_classificados[0].keys())
-            ws.append(cabecalhos)
-            
-            # Adicionar os dados classificados ao Excel
-            for linha in dados_classificados:
-                ws.append(list(linha.values()))
-            
-            wb.save(output)
-            
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df_classificado.to_excel(writer, sheet_name='CURVA ABC', index=False)
+
             # Botão de download do arquivo Excel
             st.download_button(
                 label="Baixar Curva ABC",
@@ -87,7 +71,7 @@ def main():
                 file_name="curva_abc_classificada.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-        
+
         except Exception as e:
             st.error(f'Erro ao processar arquivo: {str(e)}')
 
