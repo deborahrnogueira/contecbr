@@ -4,18 +4,18 @@ import plotly.graph_objects as go
 import io
 
 def criar_curva_abc(df):
-    # Selecionar apenas as linhas 12 a 310 e usar a coluna G (TOTAL)
+    # Selecionar apenas as linhas 12 a 310
     df = df.iloc[11:310].copy()
     
-    # Remover o R$ e converter para float
-    df['TOTAL'] = df.iloc[:, 6].str.replace('R$ ', '').str.replace('.', '').str.replace(',', '.').astype(float)
+    # Limpar e converter a coluna TOTAL
+    df[' TOTAL '] = df[' TOTAL '].str.replace('R$ ', '').str.replace('.', '').str.replace(',', '.').astype(float)
     
     # Ordenar por valor total em ordem decrescente
-    df = df.sort_values('TOTAL', ascending=False)
+    df = df.sort_values(' TOTAL ', ascending=False)
     
     # Calcular percentuais
-    total_geral = df['TOTAL'].sum()
-    df['INCIDÊNCIA DO ITEM (%)'] = (df['TOTAL'] / total_geral) * 100
+    total_geral = df[' TOTAL '].sum()
+    df['INCIDÊNCIA DO ITEM (%)'] = (df[' TOTAL '] / total_geral) * 100
     df['INCIDÊNCIA ACUMULADA (%)'] = df['INCIDÊNCIA DO ITEM (%)'].cumsum()
     
     # Classificar
@@ -40,6 +40,11 @@ def main():
             # Ler arquivo especificando a aba correta
             df = pd.read_excel(uploaded_file, sheet_name='CURVA ABC')
             
+            if ' TOTAL ' not in df.columns:
+                st.error("Colunas disponíveis na planilha:")
+                st.write(df.columns.tolist())
+                return
+                
             df_classificado = criar_curva_abc(df)
             
             st.subheader('Dados Classificados')
