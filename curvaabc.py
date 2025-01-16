@@ -1,13 +1,11 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-import io
-import numpy as np
-from fpdf import FPDF
 import plotly.express as px
 import plotly.graph_objects as go
+import numpy as np
+from fpdf import FPDF
 from datetime import datetime
+import io
 
 # Configuração da página
 st.set_page_config(page_title="Análise Curva ABC", layout="wide")
@@ -144,61 +142,22 @@ def criar_grafico_pizza(df):
     )
     return fig
 
-# Função para criar heatmap
-def criar_heatmap(df):
-    pivot = pd.pivot_table(
-        df,
-        values='TOTAL',
-        index='CLASSIFICAÇÃO',
-        columns=pd.qcut(df['INCIDÊNCIA DO ITEM (%)'], q=10, labels=['D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9', 'D10']),
-        aggfunc='sum'
-    )
-    
-    fig = px.imshow(
-        pivot,
-        title='Heatmap de Concentração de Valores',
-        labels=dict(x='Decil', y='Classificação', color='Valor Total')
-    )
-    return fig
-
-# Função para gerar PDF
-def gerar_pdf(df, figs):
-    pdf = FPDF()
-    
-    # Primeira página - Sumário Executivo
-    pdf.add_page()
-    pdf.set_font('Arial', 'B', 16)
-    pdf.cell(0, 10, 'Análise Curva ABC - Sumário Executivo', ln=True, align='C')
-    
-    pdf.set_font('Arial', '', 12)
+# Função para criar tabela de distribuição
+def criar_tabela_distribuicao(df):
     resumo = df.groupby('CLASSIFICAÇÃO').agg({
-        'TOTAL': ['count', 'sum'],
-        'INCIDÊNCIA DO ITEM (%)': 'mean'
+        'TOTAL': ['sum', 'count'],
+        'INCIDÊNCIA DO ITEM (%)': 'sum'
     }).round(2)
     
-    # Adicionar texto do sumário
-    pdf.set_font('Arial', '', 10)
-    pdf.multi_cell(0, 10, f"""
-    Data da análise: {datetime.now().strftime('%d/%m/%Y')}
+    resumo.columns = ['Valor Total', 'Quantidade', 'Incidência (%)']
+    resumo = resumo.reset_index()
     
-    Principais conclusões:
-    - Classe A: {resumo.loc['A', ('TOTAL', 'count')]} itens, representando {resumo.loc['A', ('INCIDÊNCIA DO ITEM (%)', 'mean')]}% do valor total
-    - Classe B: {resumo.loc['B', ('TOTAL', 'count')]} itens, representando {resumo.loc['B', ('INCIDÊNCIA DO ITEM (%)', 'mean')]}% do valor total
-    - Classe C: {resumo.loc['C', ('TOTAL', 'count')]} itens, representando {resumo.loc['C', ('INCIDÊNCIA DO ITEM (%)', 'mean')]}% do valor total
-    """)
+    # Formatação dos valores
+    resumo['Valor Total'] = resumo['Valor Total'].apply(
+        lambda x: f"R$ {x:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+    )
     
-    # Adicionar gráficos
-    for name, fig in figs.items():
-        pdf.add_page()
-        pdf.set_font('Arial', 'B', 14)
-        pdf.cell(0, 10, name, ln=True)
-        
-        # Salvar figura temporariamente
-        img_path = f"temp_{name}.png"
-        fig.write_image(img_path)
-        pdf.image(img_path, x=10, y=30, w=190)
-    
-    return pdf
+    return resumo
 
 def main():
     # Sidebar
@@ -241,15 +200,8 @@ def main():
                 
                 with col2:
                     st.subheader('Resumo da Classificação')
-                    resumo = pd.DataFrame({
-                        'Quantidade de Itens': df_classificado['CLASSIFICAÇÃO'].value_counts(),
-                        'Total (R$)': df_classificado.groupby('CLASSIFICAÇÃO')['TOTAL'].sum().round(2)
-                    }).reset_index()
-                    resumo.columns = ['Classe', 'Quantidade de Itens', 'Total (R$)']
-                    resumo['Total (R$)'] = resumo['Total (R$)'].apply(
-                        lambda x: f"R$ {x:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
-                    )
-                    st.dataframe(resumo)
+                    resumo_table = criar_tabela_distribuicao(df_classificado)
+                    st.dataframe(resumo_table, hide_index=True)
     
     with tabs[1]:
         if 'df_classificado' in locals():
@@ -257,37 +209,36 @@ def main():
             
             viz_type = st.selectbox(
                 'Selecione o tipo de visualização',
-                ['Gráfico de Pizza', 'Heatmap', 'Todos']
+                ['Gráfico de Pizza', 'Dados Detalhados', 'Todos']
             )
             
             if viz_type in ['Gráfico de Pizza', 'Todos']:
                 st.plotly_chart(criar_grafico_pizza(df_classificado))
             
-            if viz_type in ['Heatmap', 'Todos']:
-                st.plotly_chart(criar_heatmap(df_classificado))
+            if viz_type in ['Dados Detalhados', 'Todos']:
+                st.dataframe(
+                    df_classificado.style.format({
+                        'TOTAL': 'R$ {:,.2f}'.format,
+                        'INCIDÊNCIA DO ITEM (%)': '{:.2f}%'.format,
+                        'INCIDÊNCIA ACUMULADA (%)': '{:.2f}%'.format
+                    })
+                )
     
     with tabs[2]:
         if 'df_classificado' in locals():
-            st.subheader('Relatório')
+            st.subheader('Exportar Dados')
             
-            if st.button('Gerar Relatório PDF'):
-                figs = {
-                    'Curva ABC': fig_curva,
-                    'Distribuição por Classe': criar_grafico_pizza(df_classificado),
-                    'Heatmap': criar_heatmap(df_classificado)
-                }
-                
-                pdf = gerar_pdf(df_classificado, figs)
-                
-                # Salvar PDF em bytes
-                pdf_output = pdf.output(dest='S').encode('latin1')
-                
-                st.download_button(
-                    label="📥 Baixar Relatório PDF",
-                    data=pdf_output,
-                    file_name="relatorio_curva_abc.pdf",
-                    mime="application/pdf"
-                )
+            # Preparar dados para exportação
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df_classificado.to_excel(writer, sheet_name='CURVA ABC', index=False)
+            
+            st.download_button(
+                label="📥 Baixar Análise em Excel",
+                data=output.getvalue(),
+                file_name="analise_curva_abc.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
     
     with tabs[3]:
         st.subheader('Documentação')
@@ -306,11 +257,11 @@ def main():
         3. **Visualizações**
            - **Curva ABC**: Mostra a distribuição dos itens e sua importância relativa
            - **Gráfico de Pizza**: Apresenta a proporção de cada classe
-           - **Heatmap**: Indica a concentração de valores por decil
+           - **Dados Detalhados**: Mostra todos os itens com suas classificações
         
-        4. **Relatório**
-           - Gera um PDF completo com todas as análises
-           - Inclui sumário executivo e recomendações
+        4. **Exportação**
+           - Permite baixar todos os dados em formato Excel
+           - Inclui todas as análises e classificações
         """)
 
 if __name__ == '__main__':
