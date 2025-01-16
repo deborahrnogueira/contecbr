@@ -4,12 +4,15 @@ import plotly.graph_objects as go
 import io
 
 def criar_curva_abc(df):
-    # Ordenar por TOTAL em ordem decrescente
-    df = df.sort_values('TOTAL', ascending=False)
+    # Selecionar apenas as linhas 12 a 310
+    df = df.iloc[11:310]
+    
+    # Ordenar por valor total em ordem decrescente
+    df = df.sort_values(' TOTAL ', ascending=False)
     
     # Calcular percentuais
-    total_geral = df['TOTAL'].sum()
-    df['INCIDÊNCIA DO ITEM (%)'] = (df['TOTAL'] / total_geral) * 100
+    total_geral = df[' TOTAL '].sum()
+    df['INCIDÊNCIA DO ITEM (%)'] = (df[' TOTAL '] / total_geral) * 100
     df['INCIDÊNCIA ACUMULADA (%)'] = df['INCIDÊNCIA DO ITEM (%)'].cumsum()
     
     # Classificar
@@ -31,16 +34,13 @@ def main():
     
     if uploaded_file is not None:
         try:
-            # Ler o arquivo
-            df = pd.read_excel(uploaded_file, sheet_name='CURVA ABC')
+            # Ler arquivo
+            df = pd.read_excel(uploaded_file)
             
-            # Verificar se a coluna TOTAL existe
-            if 'TOTAL' not in df.columns:
-                st.error("A coluna 'TOTAL' não foi encontrada na planilha")
-                return
-                
+            # Processar dados
             df_classificado = criar_curva_abc(df)
             
+            # Mostrar resultados
             st.subheader('Dados Classificados')
             st.dataframe(df_classificado)
             
@@ -61,10 +61,10 @@ def main():
             
             st.plotly_chart(fig)
             
-            # Download
+            # Download dos resultados
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df_classificado.to_excel(writer, sheet_name='CURVA ABC', index=False)
+                df_classificado.to_excel(writer, index=False)
             
             st.download_button(
                 label="Baixar Curva ABC",
