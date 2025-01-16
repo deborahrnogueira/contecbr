@@ -8,7 +8,7 @@ def criar_curva_abc(df):
     df = df.iloc[11:310].copy()
 
     # Limpar e converter a coluna TOTAL (coluna G) para float
-    df['TOTAL'] = df.iloc[:, 5].str.replace('R\$ ', '').str.replace('.', '').str.replace(',', '.').astype(float)
+    df['TOTAL'] = df[' TOTAL '].str.replace('R\$ ', '').str.replace('.', '').str.replace(',', '.').astype(float)
 
     # Ordenar por valor total em ordem decrescente
     df = df.sort_values('TOTAL', ascending=False)
