@@ -7,8 +7,8 @@ def criar_curva_abc(df):
     # Selecionar apenas as linhas 12 a 310
     df = df.iloc[11:310].copy()
     
-    # Acessar a coluna TOTAL diretamente pela posição (coluna G = índice 6)
-    df['TOTAL'] = df.iloc[:, 6].str.replace('R\$ ', '').str.replace('.', '').str.replace(',', '.').astype(float)
+    # Acessar a coluna TOTAL diretamente pela posição (coluna G = índice 5)
+    df['TOTAL'] = df.iloc[:, 5].str.replace('R\$ ', '').str.replace('.', '').str.replace(',', '.').astype(float)
     
     # Ordenar por valor total em ordem decrescente
     df = df.sort_values('TOTAL', ascending=False)
@@ -18,7 +18,7 @@ def criar_curva_abc(df):
     df['INCIDÊNCIA DO ITEM (%)'] = (df['TOTAL'] / total_geral) * 100
     df['INCIDÊNCIA ACUMULADA (%)'] = df['INCIDÊNCIA DO ITEM (%)'].cumsum()
     
-    # Classificar
+    # Classificar em A, B ou C
     def get_classe(acumulado):
         if acumulado <= 80:
             return 'A'
@@ -40,31 +40,30 @@ def main():
             # Ler arquivo especificando a aba correta
             df = pd.read_excel(uploaded_file, sheet_name='CURVA ABC')
             
-            # Listar colunas disponíveis para depuração
-            st.write("Colunas disponíveis na planilha:", df.columns.tolist())
-            
             # Processar dados
             df_classificado = criar_curva_abc(df)
             
+            # Mostrar resultados
             st.subheader('Dados Classificados')
             st.dataframe(df_classificado)
             
-            # Criar gráfico
+            # Criar gráfico da curva ABC
             fig = go.Figure()
             fig.add_trace(go.Scatter(
                 x=list(range(len(df_classificado))),
                 y=df_classificado['INCIDÊNCIA ACUMULADA (%)'],
-                mode='lines',
+                mode='lines+markers',
                 name='Curva ABC'
             ))
             
             fig.update_layout(
                 title='Curva ABC',
                 xaxis_title='Itens',
-                yaxis_title='Percentual Acumulado (%)'
+                yaxis_title='Percentual Acumulado (%)',
+                template='plotly_white'
             )
             
-            st.plotly_chart(fig)
+            st.plotly_chart(fig, use_container_width=True)
             
             # Download dos resultados
             output = io.BytesIO()
