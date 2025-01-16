@@ -4,122 +4,104 @@ import matplotlib.pyplot as plt
 import io
 import numpy as np
 
-def validar_dados(df):
-    """Valida os dados de entrada"""
-    if df.empty:
-        raise ValueError("A planilha está vazia")
-    
-    if df.shape[1] < 7:  # Verifica se tem pelo menos 7 colunas (até a coluna G)
-        raise ValueError("A planilha não tem o número mínimo de colunas necessário")
-    
-    # Verifica se há dados suficientes após o slice
-    if len(df.iloc[11:310]) == 0:
-        raise ValueError("Não há dados suficientes nas linhas especificadas (12 a 310)")
-    
-    return True
+# Configuração para melhorar performance
+st.set_page_config(page_title="Análise Curva ABC", layout="wide")
 
-def limpar_valor_monetario(valor):
-    """Limpa e converte valores monetários para float"""
-    try:
-        if isinstance(valor, (int, float)):
-            return float(valor)
-        return float(str(valor).replace('R$ ', '').replace('.', '').replace(',', '.'))
-    except:
-        return 0.0
+# Cache da leitura do arquivo
+@st.cache_data
+def load_data(uploaded_file):
+    return pd.read_excel(uploaded_file, sheet_name='CURVA ABC')
 
+# Cache do processamento principal
+@st.cache_data
 def criar_curva_abc(df):
-    """
-    Cria a análise da curva ABC a partir do DataFrame
-    """
-    try:
-        # Selecionar apenas as linhas 12 a 310
-        df = df.iloc[11:310].copy()
-        
-        # Converter coluna G (TOTAL) para float, tratando possíveis erros
-        df['TOTAL'] = df.iloc[:, 6].apply(limpar_valor_monetario)
-        
-        # Remover linhas com total zero
-        df = df[df['TOTAL'] > 0]
-        
-        # Ordenar por valor total em ordem decrescente
-        df = df.sort_values('TOTAL', ascending=False)
-        
-        # Calcular percentuais
-        total_geral = df['TOTAL'].sum()
-        df['INCIDÊNCIA DO ITEM (%)'] = (df['TOTAL'] / total_geral) * 100
-        df['INCIDÊNCIA ACUMULADA (%)'] = df['INCIDÊNCIA DO ITEM (%)'].cumsum()
-        
-        # Classificar em A, B ou C
-        def get_classe(acumulado):
-            if acumulado <= 80:
-                return 'A'
-            elif acumulado <= 95:
-                return 'B'
-            else:
-                return 'C'
-        
-        df['CLASSIFICAÇÃO'] = df['INCIDÊNCIA ACUMULADA (%)'].apply(get_classe)
-        
-        # Adicionar contagem por classificação
-        df['NÚMERO DO ITEM'] = range(1, len(df) + 1)
-        
-        return df
-    except Exception as e:
-        raise Exception(f"Erro ao processar a curva ABC: {str(e)}")
+    """Cria a análise da curva ABC a partir do DataFrame"""
+    # Selecionar apenas as linhas 12 a 310
+    df = df.iloc[11:310].copy()
+    
+    # Definir os nomes das colunas
+    colunas = ['Unnamed: 0', 'Item', 'SIGLA', 'DESCRIÇÃO', 'UND', 'QTD', 'TOTAL',
+               'INCIDÊNCIA DO ITEM (%)', 'INCIDÊNCIA DO ITEM (%) ACUMULADO',
+               'Unnamed: 9', 'Unnamed: 10', 'Unnamed: 11', 'Unnamed: 12',
+               'Unnamed: 13', 'Unnamed: 14', 'Unnamed: 15']
+    
+    # Ajustar o número de colunas se necessário
+    while len(df.columns) < len(colunas):
+        df[f'Unnamed: {len(df.columns)}'] = None
+    
+    df.columns = colunas
+    
+    # Converter coluna TOTAL para float
+    df['TOTAL'] = pd.to_numeric(df['TOTAL'].str.replace('R\$ ', '').str.replace('.', '').str.replace(',', '.'), errors='coerce')
+    
+    # Remover linhas com total zero ou NaN
+    df = df[df['TOTAL'] > 0].reset_index(drop=True)
+    
+    # Ordenar por valor total em ordem decrescente
+    df = df.sort_values('TOTAL', ascending=False)
+    
+    # Calcular percentuais
+    total_geral = df['TOTAL'].sum()
+    df['INCIDÊNCIA DO ITEM (%)'] = (df['TOTAL'] / total_geral) * 100
+    df['INCIDÊNCIA ACUMULADA (%)'] = df['INCIDÊNCIA DO ITEM (%)'].cumsum()
+    
+    # Classificar em A, B ou C
+    conditions = [
+        df['INCIDÊNCIA ACUMULADA (%)'] <= 80,
+        df['INCIDÊNCIA ACUMULADA (%)'] <= 95
+    ]
+    choices = ['A', 'B']
+    df['CLASSIFICAÇÃO'] = np.select(conditions, choices, default='C')
+    
+    # Adicionar número do item
+    df['NÚMERO DO ITEM'] = range(1, len(df) + 1)
+    
+    return df
 
+# Cache da criação do gráfico
+@st.cache_data
 def criar_grafico(df):
-    """
-    Cria o gráfico da curva ABC
-    """
-    plt.clf()  # Limpa a figura atual
-    fig, ax1 = plt.subplots(figsize=(12, 7))
+    fig, ax1 = plt.subplots(figsize=(12, 6))
     
-    # Plotar a curva ABC
-    ax1.plot(df['NÚMERO DO ITEM'], df['INCIDÊNCIA ACUMULADA (%)'], 
-            marker='o', color='blue', linewidth=2, markersize=4)
+    # Criar barras para cada item
+    bars = ax1.bar(df['NÚMERO DO ITEM'], df['INCIDÊNCIA DO ITEM (%)'], 
+                  alpha=0.3, color=df['CLASSIFICAÇÃO'].map({'A': 'blue', 'B': 'orange', 'C': 'green'}))
     
-    # Adicionar linha de referência em 80%
-    ax1.axhline(y=80, color='r', linestyle='--', alpha=0.5)
-    ax1.axhline(y=95, color='orange', linestyle='--', alpha=0.5)
+    # Adicionar linha de incidência acumulada
+    ax2 = ax1.twinx()
+    line = ax2.plot(df['NÚMERO DO ITEM'], df['INCIDÊNCIA ACUMULADA (%)'], 
+                   color='red', linewidth=2, label='Incidência Acumulada')
     
-    # Configurar os eixos
-    ax1.set_xlabel('Número de Itens', fontsize=10)
-    ax1.set_ylabel('Incidência Acumulada (%)', fontsize=10)
-    ax1.grid(True, alpha=0.3)
+    # Adicionar linhas de referência
+    ax2.axhline(y=80, color='red', linestyle='--', alpha=0.5)
+    ax2.axhline(y=95, color='orange', linestyle='--', alpha=0.5)
     
-    # Adicionar título e legendas
-    plt.title('Curva ABC', fontsize=12, pad=20)
+    # Configurar eixos
+    ax1.set_xlabel('Número de Itens')
+    ax1.set_ylabel('Incidência do Item (%)')
+    ax2.set_ylabel('Incidência Acumulada (%)')
     
-    # Adicionar descrição das classes
-    plt.text(0, 82, 'Classe A (0-80%)', color='r', fontsize=8)
-    plt.text(0, 97, 'Classe B (80-95%)', color='orange', fontsize=8)
-    plt.text(0, 99, 'Classe C (95-100%)', color='g', fontsize=8)
+    # Adicionar legendas
+    ax1.legend(bars[:3], ['Classe A', 'Classe B', 'Classe C'])
+    ax2.legend(line, ['Incidência Acumulada'])
     
+    plt.title('Curva ABC com Distribuição de Itens')
     return fig
 
 def main():
-    st.set_page_config(page_title="Análise Curva ABC", layout="wide")
-    
     st.title('Análise Curva ABC')
-    st.markdown("""
-    Esta aplicação realiza a análise da Curva ABC a partir de uma planilha Excel.
-    Por favor, carregue um arquivo Excel contendo os dados na aba 'CURVA ABC'.
-    """)
     
     uploaded_file = st.file_uploader("Carregue a planilha Excel", type=['xlsx'])
     
     if uploaded_file is not None:
         try:
-            # Ler o arquivo Excel
-            df = pd.read_excel(uploaded_file, sheet_name='CURVA ABC')
+            # Carregar dados com cache
+            df = load_data(uploaded_file)
             
-            # Validar os dados
-            validar_dados(df)
-            
-            # Processar os dados e criar a curva ABC
+            # Processar dados com cache
             df_classificado = criar_curva_abc(df)
             
-            # Criar duas colunas para organizar o layout
+            # Interface dividida em colunas
             col1, col2 = st.columns([2, 1])
             
             with col1:
@@ -129,23 +111,29 @@ def main():
             
             with col2:
                 st.subheader('Resumo da Classificação')
-                resumo = df_classificado['CLASSIFICAÇÃO'].value_counts().reset_index()
-                resumo.columns = ['Classe', 'Quantidade de Itens']
-                resumo['Percentual de Itens'] = (resumo['Quantidade de Itens'] / len(df_classificado) * 100).round(2)
+                resumo = pd.DataFrame({
+                    'Quantidade de Itens': df_classificado['CLASSIFICAÇÃO'].value_counts(),
+                    'Total (R$)': df_classificado.groupby('CLASSIFICAÇÃO')['TOTAL'].sum().round(2)
+                }).reset_index()
+                resumo.columns = ['Classe', 'Quantidade de Itens', 'Total (R$)']
                 st.dataframe(resumo)
             
-            st.subheader('Dados Classificados')
-            st.dataframe(df_classificado)
+            # Mostra apenas as primeiras 100 linhas por padrão
+            st.subheader('Dados Classificados (Primeiras 100 linhas)')
+            st.dataframe(df_classificado.head(100))
             
-            # Exportar os resultados para Excel
+            # Botão para mostrar dados completos
+            if st.button('Mostrar Todos os Dados'):
+                st.dataframe(df_classificado)
+            
+            # Download dos resultados
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df_classificado.to_excel(writer, sheet_name='CURVA ABC', index=False)
-            
-            output.seek(0)  # Reset pointer
+            output.seek(0)
             
             st.download_button(
-                label="📥 Baixar Resultados em Excel",
+                label="📥 Baixar Resultados",
                 data=output.getvalue(),
                 file_name="curva_abc_classificada.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -153,7 +141,6 @@ def main():
             
         except Exception as e:
             st.error(f'Erro ao processar arquivo: {str(e)}')
-            st.info('Por favor, verifique se o arquivo está no formato correto e contém todos os dados necessários.')
 
 if __name__ == '__main__':
     main()
