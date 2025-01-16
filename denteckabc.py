@@ -7,7 +7,7 @@ def criar_curva_abc(df):
     # Selecionar apenas as linhas 12 a 310
     df = df.iloc[11:310].copy()
     
-    # Limpar e converter a coluna TOTAL (coluna G)
+    # Acessar a coluna TOTAL diretamente pela posição (coluna G = índice 5)
     df['TOTAL'] = df.iloc[:, 5].str.replace('R\$ ', '').str.replace('.', '').str.replace(',', '.').astype(float)
     
     # Ordenar por valor total em ordem decrescente
@@ -18,7 +18,7 @@ def criar_curva_abc(df):
     df['INCIDÊNCIA DO ITEM (%)'] = (df['TOTAL'] / total_geral) * 100
     df['INCIDÊNCIA ACUMULADA (%)'] = df['INCIDÊNCIA DO ITEM (%)'].cumsum()
     
-    # Classificar
+    # Classificar em A, B ou C
     def get_classe(acumulado):
         if acumulado <= 80:
             return 'A'
