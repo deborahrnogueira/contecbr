@@ -55,14 +55,16 @@ def carregar_dados(uploaded_file):
 
 def limpar_valor_monetario(valor):
     """Converte strings de valor monetário para float"""
-    if isinstance(valor, str):
-        # Remove R$, espaços e substitui vírgula por ponto
-        valor = valor.replace('R$', '').replace(' ', '').replace('.', '').replace(',', '.')
-    return float(valor)
-
-def formatar_moeda_real(valor):
-    """Formata um número para o formato de moeda brasileira"""
-    return f"R$ {valor:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.')
+    try:
+        if isinstance(valor, str):
+            # Ignora a string 'TOTAL' que pode vir do cabeçalho
+            if valor.upper() == 'TOTAL':
+                return 0
+            # Remove R$, espaços e substitui vírgula por ponto
+            valor = valor.replace('R$', '').replace(' ', '').replace('.', '').replace(',', '.')
+        return float(valor)
+    except (ValueError, AttributeError):
+        return 0
 
 def processar_dados(df):
     """Processa os dados para análise ABC"""
@@ -70,11 +72,18 @@ def processar_dados(df):
         # Criar cópia do DataFrame
         df_processado = df.copy()
         
-        # Limpar e converter a coluna TOTAL
-        df_processado['TOTAL'] = df_processado['TOTAL'].apply(limpar_valor_monetario)
+        # Verificar se há dados válidos
+        if df_processado.empty:
+            raise Exception("DataFrame está vazio")
+            
+        # Converter a coluna TOTAL para numérico, tratando valores inválidos
+        df_processado['TOTAL'] = pd.to_numeric(df_processado['TOTAL'].apply(limpar_valor_monetario), errors='coerce')
         
-        # Remover linhas com total zero ou nulo
+        # Remover linhas com total zero, nulo ou inválido
         df_processado = df_processado[df_processado['TOTAL'] > 0].reset_index(drop=True)
+        
+        if df_processado.empty:
+            raise Exception("Nenhum valor válido encontrado na coluna TOTAL")
         
         # Ordenar por valor total
         df_processado = df_processado.sort_values('TOTAL', ascending=False).reset_index(drop=True)
