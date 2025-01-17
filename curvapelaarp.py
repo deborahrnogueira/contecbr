@@ -53,6 +53,50 @@ def carregar_dados(uploaded_file):
     except Exception as e:
         raise Exception(f"Erro ao carregar arquivo: {str(e)}")
 
+def limpar_valor_monetario(valor):
+    """Converte strings de valor monetário para float"""
+    if isinstance(valor, str):
+        # Remove R$, espaços e substitui vírgula por ponto
+        valor = valor.replace('R$', '').replace(' ', '').replace('.', '').replace(',', '.')
+    return float(valor)
+
+def formatar_moeda_real(valor):
+    """Formata um número para o formato de moeda brasileira"""
+    return f"R$ {valor:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.')
+
+def processar_dados(df):
+    """Processa os dados para análise ABC"""
+    try:
+        # Criar cópia do DataFrame
+        df_processado = df.copy()
+        
+        # Limpar e converter a coluna TOTAL
+        df_processado['TOTAL'] = df_processado['TOTAL'].apply(limpar_valor_monetario)
+        
+        # Remover linhas com total zero ou nulo
+        df_processado = df_processado[df_processado['TOTAL'] > 0].reset_index(drop=True)
+        
+        # Ordenar por valor total
+        df_processado = df_processado.sort_values('TOTAL', ascending=False).reset_index(drop=True)
+        
+        # Calcular percentuais
+        total_geral = df_processado['TOTAL'].sum()
+        df_processado['INCIDÊNCIA DO ITEM (%)'] = (df_processado['TOTAL'] / total_geral * 100).round(2)
+        df_processado['INCIDÊNCIA DO ITEM (%) ACUMULADO'] = df_processado['INCIDÊNCIA DO ITEM (%)'].cumsum().round(2)
+        
+        # Classificar itens
+        df_processado['CLASSIFICAÇÃO'] = df_processado['INCIDÊNCIA DO ITEM (%) ACUMULADO'].apply(
+            lambda x: 'A' if x <= 80 else ('B' if x <= 95 else 'C'))
+        
+        # Adicionar número do item e formatar total
+        df_processado['NÚMERO DO ITEM'] = range(1, len(df_processado) + 1)
+        df_processado['TOTAL_FORMATADO'] = df_processado['TOTAL'].apply(formatar_moeda_real)
+        
+        return df_processado
+        
+    except Exception as e:
+        raise Exception(f"Erro ao processar dados: {str(e)}")
+
 def gerar_pdf(df_processado, fig_pareto, fig_pizza, resumo):
     """Gera relatório PDF com análises usando FPDF"""
     class PDF(FPDF):
