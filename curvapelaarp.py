@@ -305,12 +305,13 @@ def main():
                 ))
                 
                 fig_pareto.add_trace(go.Scatter(
-                    x=df_processado['NÚMERO DO ITEM'],
-                    y=df_processado['INCIDÊNCIA DO ITEM (%) ACUMULADO'],
-                    name='Acumulado',
-                    line=dict(color='red', width=2),
-                    yaxis='y2',
-                    hovertemplate="<b>Acumulado:</b> %{y:.2f}%
+    x=df_processado['NÚMERO DO ITEM'],
+    y=df_processado['INCIDÊNCIA DO ITEM (%) ACUMULADO'],
+    name='Acumulado',
+    line=dict(color='red', width=2),
+    yaxis='y2',
+    hovertemplate="<b>Acumulado:</b> %{y:.2f}%<extra></extra>"
+))
 
                 fig_pareto.add_trace(go.Scatter(
                     x=df_processado['NÚMERO DO ITEM'],
