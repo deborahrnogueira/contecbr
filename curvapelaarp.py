@@ -19,46 +19,110 @@ TOOLTIPS = {
     'CLASSIFICAÇÃO': 'A: Items críticos (80% do valor)\nB: Items intermediários (15% do valor)\nC: Items menos críticos (5% do valor)'
 }
 
-def formatar_moeda_real(valor):
-    """Formata um número para exibição no formato X.XXX,XX"""
-    try:
-        if pd.isna(valor) or valor == 0:
-            return "R$ 0,00"
-        return f"R$ {valor:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.')
-    except Exception:
-        return "R$ 0,00"
-
 def limpar_valor_monetario(valor):
-    """Converte uma string de valor monetário no formato X.XXX,XX para float"""
+    """Converte uma string de valor monetário para float"""
     try:
+        if pd.isna(valor):
+            return 0.0
         if isinstance(valor, str):
-            # Remove espaços e converte vírgula para ponto
+            # Remove R$, espaços e converte para float
             valor = valor.replace('R$', '').replace(' ', '').replace('.', '').replace(',', '.')
         return float(valor)
-    except (ValueError, AttributeError):
+    except:
         return 0.0
+
+def formatar_moeda_real(valor):
+    """Formata um número para o formato de moeda brasileira"""
+    try:
+        return f"R$ {valor:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.')
+    except:
+        return "R$ 0,00"
+
+def carregar_dados(uploaded_file):
+    """Carrega e prepara os dados da planilha, removendo linhas específicas"""
+    try:
+        # Lista de linhas a serem removidas (mantendo a referência original)
+        linhas_excluir = [14, 15, 30, 59, 262]
+        
+        file_extension = uploaded_file.name.split('.')[-1].lower()
+        
+        if file_extension in ['xlsx', 'xlsm']:
+            # Primeiro, vamos ler todas as linhas para identificar corretamente as que precisamos remover
+            df_temp = pd.read_excel(uploaded_file, sheet_name='ARP', usecols='A:Q', header=None)
+            
+            # Encontrar o índice real da linha que contém os cabeçalhos (normalmente linha 11)
+            header_index = None
+            for idx, row in df_temp.iterrows():
+                if 'ITEM' in str(row[0]).upper():
+                    header_index = idx
+                    break
+            
+            if header_index is None:
+                raise Exception("Não foi possível encontrar o cabeçalho da planilha")
+            
+            # Agora vamos ler o arquivo novamente, mas pulando até o cabeçalho
+            df = pd.read_excel(
+                uploaded_file,
+                sheet_name='ARP',
+                usecols='A:Q',
+                header=header_index
+            )
+            
+            # Converter os números das linhas originais para índices do DataFrame
+            linhas_para_remover = [x - (header_index + 2) for x in linhas_excluir]
+            
+        elif file_extension == 'csv':
+            df = pd.read_csv(uploaded_file)
+            linhas_para_remover = [x - 1 for x in linhas_excluir]
+        else:
+            raise Exception("Formato de arquivo não suportado. Use .xlsx, .xlsm ou .csv")
+        
+        # Renomear colunas para garantir consistência
+        df.columns = [
+            'ITEM', 'SIGLA', 'DESCRIÇÃO', 'UND', 'QTD', 'MO', 'MAT', 'EQUIP', 
+            'SUBTOTAL', 'BDI MO', 'BDI MAT', 'BDI EQUIP', 'EQUIP S/ BDI',
+            'MO C/ BDI', 'MAT C/ BDI', 'EQUIP C/ BDI2', 'TOTAL'
+        ]
+        
+        # Remover as linhas específicas
+        df = df.drop(linhas_para_remover, errors='ignore')
+        
+        # Limpar e converter a coluna TOTAL
+        df['TOTAL'] = df['TOTAL'].apply(limpar_valor_monetario)
+        
+        # Remover linhas com valores inválidos ou zero
+        df = df[df['TOTAL'] > 0]
+        
+        # Resetar o índice
+        df = df.reset_index(drop=True)
+        
+        # Verificação final
+        if df.empty:
+            raise Exception("Nenhum dado válido encontrado após o processamento")
+            
+        return df
+        
+    except Exception as e:
+        raise Exception(f"Erro ao carregar arquivo: {str(e)}")
 
 def processar_dados(df):
     """Processa os dados para análise ABC"""
     try:
+        # Verificar se há dados válidos
         if df.empty:
             raise Exception("DataFrame está vazio")
-        
+            
         # Criar cópia do DataFrame
         df_processado = df.copy()
-        
-        # Garantir que TOTAL seja numérico
-        df_processado['TOTAL'] = pd.to_numeric(df_processado['TOTAL'], errors='coerce')
-        df_processado = df_processado[df_processado['TOTAL'] > 0].reset_index(drop=True)
-        
-        if df_processado.empty:
-            raise Exception("Nenhum valor válido encontrado após limpeza dos dados")
         
         # Ordenar por valor total
         df_processado = df_processado.sort_values('TOTAL', ascending=False).reset_index(drop=True)
         
         # Calcular percentuais
         total_geral = df_processado['TOTAL'].sum()
+        if total_geral <= 0:
+            raise Exception("Soma total dos valores é zero ou negativa")
+            
         df_processado['INCIDÊNCIA DO ITEM (%)'] = (df_processado['TOTAL'] / total_geral * 100).round(2)
         df_processado['INCIDÊNCIA DO ITEM (%) ACUMULADO'] = df_processado['INCIDÊNCIA DO ITEM (%)'].cumsum().round(2)
         
@@ -66,67 +130,14 @@ def processar_dados(df):
         df_processado['CLASSIFICAÇÃO'] = df_processado['INCIDÊNCIA DO ITEM (%) ACUMULADO'].apply(
             lambda x: 'A' if x <= 80 else ('B' if x <= 95 else 'C'))
         
-        # Adicionar número do item
+        # Adicionar número do item e formatar total
         df_processado['NÚMERO DO ITEM'] = range(1, len(df_processado) + 1)
-        
-        # Formatar valor total para exibição
         df_processado['TOTAL_FORMATADO'] = df_processado['TOTAL'].apply(formatar_moeda_real)
         
         return df_processado
         
     except Exception as e:
         raise Exception(f"Erro ao processar dados: {str(e)}")
-
-def carregar_dados(uploaded_file):
-    """Carrega e prepara os dados da planilha"""
-    try:
-        file_extension = uploaded_file.name.split('.')[-1].lower()
-        
-        # Linhas a serem removidas (considerando a numeração original do Excel)
-        linhas_remover = [14, 15, 30, 59, 262]
-        
-        if file_extension == 'csv':
-            df = pd.read_csv(uploaded_file)
-            # Ajusta índices para base 0
-            linhas_para_remover = [x - 1 for x in linhas_remover]
-            
-        elif file_extension in ['xlsx', 'xlsm']:
-            # Lê o arquivo pulando as 11 primeiras linhas
-            df = pd.read_excel(
-                uploaded_file,
-                sheet_name='ARP',
-                usecols='A:Q',
-                skiprows=11
-            )
-            # Ajusta índices considerando as linhas puladas
-            linhas_para_remover = [x - 12 for x in linhas_remover]
-            
-        else:
-            raise Exception("Formato de arquivo não suportado. Use .xlsx, .xlsm ou .csv")
-        
-        # Remove as linhas especificadas
-        df = df.drop(index=linhas_para_remover, errors='ignore')
-        
-        # Renomear colunas
-        df.columns = [
-            'ITEM', 'SIGLA', 'DESCRIÇÃO', 'UND', 'QTD', 'MO', 'MAT', 'EQUIP', 
-            'SUBTOTAL', 'BDI MO', 'BDI MAT', 'BDI EQUIP', 'EQUIP S/ BDI',
-            'MO C/ BDI', 'MAT C/ BDI', 'EQUIP C/ BDI2', 'TOTAL'
-        ]
-        
-        # Converte valores monetários para float
-        df['TOTAL'] = df['TOTAL'].astype(str).apply(limpar_valor_monetario)
-        
-        # Remove linhas com valores inválidos
-        df = df[df['TOTAL'] > 0]
-        
-        # Reset do índice
-        df = df.reset_index(drop=True)
-        
-        return df
-        
-    except Exception as e:
-        raise Exception(f"Erro ao carregar arquivo: {str(e)}")
 
 def criar_guia_uso():
     """Cria o guia de uso da ferramenta"""
@@ -152,7 +163,7 @@ def criar_guia_uso():
     ## 3. Filtros e Análises
     - Use os filtros para focar em classes específicas
     - Utilize a busca para encontrar itens específicos
-    - Export os dados processados em Excel
+    - Exporte os dados processados em Excel
     
     ## 4. Recomendações de Uso
     - Atualize os dados periodicamente
@@ -162,7 +173,7 @@ def criar_guia_uso():
     return guia
 
 def gerar_pdf(df_processado, fig_pareto, fig_pizza, resumo):
-    """Gera relatório PDF com análises usando FPDF"""
+    """Gera relatório PDF com análises"""
     class PDF(FPDF):
         def header(self):
             self.set_font('Arial', 'B', 15)
@@ -189,8 +200,7 @@ def gerar_pdf(df_processado, fig_pareto, fig_pizza, resumo):
         f'Esta análise contempla {total_itens} itens, totalizando {formatar_moeda_real(total_valor)}. '
         'Os itens foram classificados em três categorias (A, B e C) de acordo com sua representatividade financeira.')
     
-    # Salvar gráficos como imagens
-    # Pareto
+    # Análise de Pareto
     pdf.add_page()
     pdf.set_font('Arial', 'B', 12)
     pdf.cell(0, 10, 'Análise de Pareto', 0, 1)
@@ -199,7 +209,7 @@ def gerar_pdf(df_processado, fig_pareto, fig_pizza, resumo):
     fig_pareto.write_image(pareto_img, format='png', width=800, height=400)
     pdf.image(pareto_img, x=10, y=30, w=190)
     
-    # Pizza
+    # Gráfico de Pizza
     pdf.add_page()
     pdf.set_font('Arial', 'B', 12)
     pdf.cell(0, 10, 'Distribuição por Classe', 0, 1)
@@ -246,7 +256,6 @@ def gerar_pdf(df_processado, fig_pareto, fig_pizza, resumo):
     for rec in recomendacoes:
         pdf.multi_cell(0, 10, rec)
     
-    # Salvar PDF
     return BytesIO(pdf.output(dest='S').encode('latin1'))
 
 def main():
@@ -256,7 +265,7 @@ def main():
     st.sidebar.title('Configurações')
     st.sidebar.info('Formatos aceitos: .xlsx, .xlsm e .csv')
     
-    # Adicionar botão para mostrar guia
+    # Botão para mostrar guia
     if st.sidebar.button('📚 Mostrar Guia de Uso'):
         st.sidebar.markdown(criar_guia_uso())
     
@@ -271,7 +280,7 @@ def main():
             
             # Aba 1: Visão Geral
             with tab1:
-                # Criar gráficos com tooltips melhorados
+                # Gráfico de Pareto
                 fig_pareto = go.Figure()
                 
                 fig_pareto.add_trace(go.Bar(
@@ -295,6 +304,14 @@ def main():
                     """
                 ))
                 
+                fig_pareto.add_trace(go.Scatter(
+                    x=df_processado['NÚMERO DO ITEM'],
+                    y=df_processado['INCIDÊNCIA DO ITEM (%) ACUMULADO'],
+                    name='Acumulado',
+                    line=dict(color='red', width=2),
+                    yaxis='y2',
+                    hovertemplate="<b>Acumulado:</b> %{y:.2f}%
+
                 fig_pareto.add_trace(go.Scatter(
                     x=df_processado['NÚMERO DO ITEM'],
                     y=df_processado['INCIDÊNCIA DO ITEM (%) ACUMULADO'],
