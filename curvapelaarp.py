@@ -141,7 +141,6 @@ def gerar_pdf(df_processado, fig_pareto, fig_pizza, resumo):
     # Salvar PDF
     return BytesIO(pdf.output(dest='S').encode('latin1'))
     
-    )
     story.append(Paragraph("Relatório de Análise Curva ABC", title_style))
     
     # Sumário Executivo
