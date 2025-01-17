@@ -22,8 +22,10 @@ TOOLTIPS = {
 def formatar_moeda_real(valor):
     """Formata um número para o formato de moeda brasileira"""
     try:
+        if pd.isna(valor) or valor == 0:
+            return "R$ 0,00"
         return f"R$ {valor:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.')
-    except (ValueError, TypeError):
+    except Exception:
         return "R$ 0,00"
 
 def limpar_valor_monetario(valor):
@@ -42,29 +44,21 @@ def limpar_valor_monetario(valor):
 def processar_dados(df):
     """Processa os dados para análise ABC"""
     try:
-        # Criar cópia do DataFrame
-        df_processado = df.copy()
-        
         # Verificar se há dados válidos
-        if df_processado.empty:
+        if df.empty:
             raise Exception("DataFrame está vazio")
         
-        # Converter a coluna TOTAL para numérico, tratando valores inválidos
-        df_processado['TOTAL'] = df_processado['TOTAL'].apply(lambda x: 
-            pd.to_numeric(str(x).replace('R$', '').replace('.', '').replace(',', '.').strip(), 
-            errors='coerce'))
-        
-        # Remover linhas com total zero, nulo ou inválido
-        df_processado = df_processado[df_processado['TOTAL'] > 0].reset_index(drop=True)
-        
-        if df_processado.empty:
-            raise Exception("Nenhum valor válido encontrado na coluna TOTAL")
+        # Criar cópia do DataFrame
+        df_processado = df.copy()
         
         # Ordenar por valor total
         df_processado = df_processado.sort_values('TOTAL', ascending=False).reset_index(drop=True)
         
         # Calcular percentuais
         total_geral = df_processado['TOTAL'].sum()
+        if total_geral <= 0:
+            raise Exception("Soma total dos valores é zero ou negativa")
+            
         df_processado['INCIDÊNCIA DO ITEM (%)'] = (df_processado['TOTAL'] / total_geral * 100).round(2)
         df_processado['INCIDÊNCIA DO ITEM (%) ACUMULADO'] = df_processado['INCIDÊNCIA DO ITEM (%)'].cumsum().round(2)
         
@@ -86,24 +80,29 @@ def carregar_dados(uploaded_file):
     try:
         file_extension = uploaded_file.name.split('.')[-1].lower()
         
-        # Lista de linhas para descartar (considerando o índice base 0 e já descontando o skiprows)
-        LINHAS_PARA_DESCARTAR = [2, 3, 18, 47, 250]  # Ajustado para base 0 e descontando skiprows=11
+        # Linhas originais a serem removidas (base 1)
+        LINHAS_ORIGINAIS = [14, 15, 30, 59, 262]
         
         if file_extension == 'csv':
             df = pd.read_csv(uploaded_file)
-            if len(LINHAS_PARA_DESCARTAR) > 0:
-                df = df.drop(LINHAS_PARA_DESCARTAR)
+            # Ajusta os índices para base 0
+            linhas_para_remover = [x - 1 for x in LINHAS_ORIGINAIS]
+            df = df.drop(linhas_para_remover, errors='ignore')
+            
         elif file_extension in ['xlsx', 'xlsm']:
+            # Lê o arquivo pulando as 11 primeiras linhas
             df = pd.read_excel(
                 uploaded_file,
                 sheet_name='ARP',
                 usecols='A:Q',
-                skiprows=11  # Pula as primeiras 11 linhas
+                skiprows=11
             )
             
-            # Remove as linhas específicas após carregar os dados
-            if len(LINHAS_PARA_DESCARTAR) > 0:
-                df = df.drop(LINHAS_PARA_DESCARTAR)
+            # Ajusta os índices considerando as linhas puladas (skiprows)
+            linhas_para_remover = [x - 12 for x in LINHAS_ORIGINAIS]  # -12 porque pulamos 11 linhas
+            # Remove as linhas e ignora índices que não existem
+            df = df.drop(linhas_para_remover, errors='ignore')
+            
         else:
             raise Exception("Formato de arquivo não suportado. Use .xlsx, .xlsm ou .csv")
         
@@ -114,10 +113,19 @@ def carregar_dados(uploaded_file):
             'MO C/ BDI', 'MAT C/ BDI', 'EQUIP C/ BDI2', 'TOTAL'
         ]
         
-        # Reset do índice após remover as linhas
+        # Limpar e converter a coluna TOTAL antes de qualquer processamento
+        df['TOTAL'] = df['TOTAL'].apply(lambda x: 
+            pd.to_numeric(str(x).replace('R$', '').replace('.', '')
+                        .replace(',', '.').strip(), errors='coerce'))
+        
+        # Remover linhas com valores nulos ou zero na coluna TOTAL
+        df = df[df['TOTAL'].notna() & (df['TOTAL'] > 0)]
+        
+        # Reset do índice após todas as operações de limpeza
         df = df.reset_index(drop=True)
         
         return df
+        
     except Exception as e:
         raise Exception(f"Erro ao carregar arquivo: {str(e)}")
 
