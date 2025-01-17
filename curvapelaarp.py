@@ -13,7 +13,6 @@ from io import BytesIO
 st.set_page_config(page_title="Análise Curva ABC", layout="wide")
 
 # Constantes
-LINHAS_PARA_DESCARTAR = [14, 15, 30, 59, 262]
 TOOLTIPS = {
     'INCIDÊNCIA DO ITEM (%)': 'Percentual que o item representa no valor total',
     'INCIDÊNCIA DO ITEM (%) ACUMULADO': 'Soma acumulada dos percentuais',
@@ -49,9 +48,11 @@ def processar_dados(df):
         # Verificar se há dados válidos
         if df_processado.empty:
             raise Exception("DataFrame está vazio")
-            
+        
         # Converter a coluna TOTAL para numérico, tratando valores inválidos
-        df_processado['TOTAL'] = pd.to_numeric(df_processado['TOTAL'].apply(limpar_valor_monetario), errors='coerce')
+        df_processado['TOTAL'] = df_processado['TOTAL'].apply(lambda x: 
+            pd.to_numeric(str(x).replace('R$', '').replace('.', '').replace(',', '.').strip(), 
+            errors='coerce'))
         
         # Remover linhas com total zero, nulo ou inválido
         df_processado = df_processado[df_processado['TOTAL'] > 0].reset_index(drop=True)
@@ -85,29 +86,36 @@ def carregar_dados(uploaded_file):
     try:
         file_extension = uploaded_file.name.split('.')[-1].lower()
         
+        # Lista de linhas para descartar (considerando o índice base 0 e já descontando o skiprows)
+        LINHAS_PARA_DESCARTAR = [2, 3, 18, 47, 250]  # Ajustado para base 0 e descontando skiprows=11
+        
         if file_extension == 'csv':
             df = pd.read_csv(uploaded_file)
+            if len(LINHAS_PARA_DESCARTAR) > 0:
+                df = df.drop(LINHAS_PARA_DESCARTAR)
         elif file_extension in ['xlsx', 'xlsm']:
             df = pd.read_excel(
                 uploaded_file,
                 sheet_name='ARP',
                 usecols='A:Q',
-                skiprows=11,
-                nrows=306
+                skiprows=11  # Pula as primeiras 11 linhas
             )
             
-            # Converter índices das linhas para descartar para posições reais no DataFrame
-            linhas_para_remover = [i-12 for i in LINHAS_PARA_DESCARTAR]
-            df = df.drop(linhas_para_remover)
-            
+            # Remove as linhas específicas após carregar os dados
+            if len(LINHAS_PARA_DESCARTAR) > 0:
+                df = df.drop(LINHAS_PARA_DESCARTAR)
         else:
             raise Exception("Formato de arquivo não suportado. Use .xlsx, .xlsm ou .csv")
         
+        # Renomear colunas
         df.columns = [
             'ITEM', 'SIGLA', 'DESCRIÇÃO', 'UND', 'QTD', 'MO', 'MAT', 'EQUIP', 
             'SUBTOTAL', 'BDI MO', 'BDI MAT', 'BDI EQUIP', 'EQUIP S/ BDI',
             'MO C/ BDI', 'MAT C/ BDI', 'EQUIP C/ BDI2', 'TOTAL'
         ]
+        
+        # Reset do índice após remover as linhas
+        df = df.reset_index(drop=True)
         
         return df
     except Exception as e:
