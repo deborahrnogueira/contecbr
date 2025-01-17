@@ -20,38 +20,12 @@ TOOLTIPS = {
     'CLASSIFICAÇÃO': 'A: Items críticos (80% do valor)\nB: Items intermediários (15% do valor)\nC: Items menos críticos (5% do valor)'
 }
 
-def carregar_dados(uploaded_file):
-    """Carrega e prepara os dados da planilha"""
+def formatar_moeda_real(valor):
+    """Formata um número para o formato de moeda brasileira"""
     try:
-        file_extension = uploaded_file.name.split('.')[-1].lower()
-        
-        if file_extension == 'csv':
-            df = pd.read_csv(uploaded_file)
-        elif file_extension in ['xlsx', 'xlsm']:
-            df = pd.read_excel(
-                uploaded_file,
-                sheet_name='ARP',
-                usecols='A:Q',
-                skiprows=11,
-                nrows=306
-            )
-            
-            # Converter índices das linhas para descartar para posições reais no DataFrame
-            linhas_para_remover = [i-12 for i in LINHAS_PARA_DESCARTAR]
-            df = df.drop(linhas_para_remover)
-            
-        else:
-            raise Exception("Formato de arquivo não suportado. Use .xlsx, .xlsm ou .csv")
-        
-        df.columns = [
-            'ITEM', 'SIGLA', 'DESCRIÇÃO', 'UND', 'QTD', 'MO', 'MAT', 'EQUIP', 
-            'SUBTOTAL', 'BDI MO', 'BDI MAT', 'BDI EQUIP', 'EQUIP S/ BDI',
-            'MO C/ BDI', 'MAT C/ BDI', 'EQUIP C/ BDI2', 'TOTAL'
-        ]
-        
-        return df
-    except Exception as e:
-        raise Exception(f"Erro ao carregar arquivo: {str(e)}")
+        return f"R$ {valor:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.')
+    except (ValueError, TypeError):
+        return "R$ 0,00"
 
 def limpar_valor_monetario(valor):
     """Converte strings de valor monetário para float"""
@@ -105,6 +79,72 @@ def processar_dados(df):
         
     except Exception as e:
         raise Exception(f"Erro ao processar dados: {str(e)}")
+
+def carregar_dados(uploaded_file):
+    """Carrega e prepara os dados da planilha"""
+    try:
+        file_extension = uploaded_file.name.split('.')[-1].lower()
+        
+        if file_extension == 'csv':
+            df = pd.read_csv(uploaded_file)
+        elif file_extension in ['xlsx', 'xlsm']:
+            df = pd.read_excel(
+                uploaded_file,
+                sheet_name='ARP',
+                usecols='A:Q',
+                skiprows=11,
+                nrows=306
+            )
+            
+            # Converter índices das linhas para descartar para posições reais no DataFrame
+            linhas_para_remover = [i-12 for i in LINHAS_PARA_DESCARTAR]
+            df = df.drop(linhas_para_remover)
+            
+        else:
+            raise Exception("Formato de arquivo não suportado. Use .xlsx, .xlsm ou .csv")
+        
+        df.columns = [
+            'ITEM', 'SIGLA', 'DESCRIÇÃO', 'UND', 'QTD', 'MO', 'MAT', 'EQUIP', 
+            'SUBTOTAL', 'BDI MO', 'BDI MAT', 'BDI EQUIP', 'EQUIP S/ BDI',
+            'MO C/ BDI', 'MAT C/ BDI', 'EQUIP C/ BDI2', 'TOTAL'
+        ]
+        
+        return df
+    except Exception as e:
+        raise Exception(f"Erro ao carregar arquivo: {str(e)}")
+
+def criar_guia_uso():
+    """Cria o guia de uso da ferramenta"""
+    guia = """
+    # Guia de Uso da Ferramenta de Análise Curva ABC
+    
+    ## 1. Carregamento de Dados
+    - Use arquivos .xlsx, .xlsm ou .csv
+    - Os dados devem estar na aba 'ARP'
+    - O cabeçalho deve estar na linha 12
+    
+    ## 2. Interpretação dos Resultados
+    
+    ### Classificação ABC
+    - Classe A: Itens que representam 80% do valor total
+    - Classe B: Itens que representam 15% do valor total
+    - Classe C: Itens que representam 5% do valor total
+    
+    ### Gráficos
+    - Pareto: Mostra a distribuição dos itens e o acumulado
+    - Pizza: Apresenta a proporção de cada classe
+    
+    ## 3. Filtros e Análises
+    - Use os filtros para focar em classes específicas
+    - Utilize a busca para encontrar itens específicos
+    - Export os dados processados em Excel
+    
+    ## 4. Recomendações de Uso
+    - Atualize os dados periodicamente
+    - Foque nos itens classe A para maior impacto
+    - Use os filtros para análises específicas
+    """
+    return guia
 
 def gerar_pdf(df_processado, fig_pareto, fig_pizza, resumo):
     """Gera relatório PDF com análises usando FPDF"""
@@ -193,106 +233,6 @@ def gerar_pdf(df_processado, fig_pareto, fig_pizza, resumo):
     
     # Salvar PDF
     return BytesIO(pdf.output(dest='S').encode('latin1'))
-    
-    story.append(Paragraph("Relatório de Análise Curva ABC", title_style))
-    
-    # Sumário Executivo
-    story.append(Paragraph("Sumário Executivo", styles['Heading2']))
-    total_itens = len(df_processado)
-    total_valor = df_processado['TOTAL'].sum()
-    
-    sumario = f"""
-    Esta análise contempla {total_itens} itens, totalizando {formatar_moeda_real(total_valor)}.
-    Os itens foram classificados em três categorias (A, B e C) de acordo com sua representatividade financeira.
-    """
-    story.append(Paragraph(sumario, styles['Normal']))
-    story.append(Spacer(1, 12))
-    
-    # Salvar gráficos como imagens
-    # Pareto
-    pareto_img = BytesIO()
-    fig_pareto.write_image(pareto_img, format='png', width=800, height=400)
-    story.append(Paragraph("Análise de Pareto", styles['Heading2']))
-    story.append(Image(pareto_img, width=400, height=200))
-    
-    # Pizza
-    pizza_img = BytesIO()
-    fig_pizza.write_image(pizza_img, format='png', width=800, height=400)
-    story.append(Paragraph("Distribuição por Classe", styles['Heading2']))
-    story.append(Image(pizza_img, width=400, height=200))
-    
-    # Resumo em tabela
-    story.append(Paragraph("Resumo por Classe", styles['Heading2']))
-    resumo_data = [['Classe', 'Qtd Itens', 'Valor Total', 'Valor Médio']]
-    for idx, row in resumo.iterrows():
-        resumo_data.append([
-            idx,
-            f"{row['Quantidade de Itens']}",
-            formatar_moeda_real(row['Valor Total']),
-            formatar_moeda_real(row['Valor Médio'])
-        ])
-    
-    t = Table(resumo_data)
-    t.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 14),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-        ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
-        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-        ('FONTSIZE', (0, 1), (-1, -1), 12),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black)
-    ]))
-    story.append(t)
-    
-    # Recomendações
-    story.append(Paragraph("Recomendações", styles['Heading2']))
-    recomendacoes = f"""
-    1. Foco em itens classe A: Priorizar a gestão dos {len(df_processado[df_processado['CLASSIFICAÇÃO']=='A'])} itens que representam 80% do valor total.
-    2. Revisão periódica: Estabelecer ciclos de revisão trimestral para itens classe A.
-    3. Otimização de estoques: Adequar políticas de estoque de acordo com a classificação.
-    """
-    story.append(Paragraph(recomendacoes, styles['Normal']))
-    
-    doc.build(story)
-    buffer.seek(0)
-    return buffer
-
-def criar_guia_uso():
-    """Cria o guia de uso da ferramenta"""
-    guia = """
-    # Guia de Uso da Ferramenta de Análise Curva ABC
-    
-    ## 1. Carregamento de Dados
-    - Use arquivos .xlsx, .xlsm ou .csv
-    - Os dados devem estar na aba 'ARP'
-    - O cabeçalho deve estar na linha 12
-    
-    ## 2. Interpretação dos Resultados
-    
-    ### Classificação ABC
-    - Classe A: Itens que representam 80% do valor total
-    - Classe B: Itens que representam 15% do valor total
-    - Classe C: Itens que representam 5% do valor total
-    
-    ### Gráficos
-    - Pareto: Mostra a distribuição dos itens e o acumulado
-    - Pizza: Apresenta a proporção de cada classe
-    
-    ## 3. Filtros e Análises
-    - Use os filtros para focar em classes específicas
-    - Utilize a busca para encontrar itens específicos
-    - Export os dados processados em Excel
-    
-    ## 4. Recomendações de Uso
-    - Atualize os dados periodicamente
-    - Foque nos itens classe A para maior impacto
-    - Use os filtros para análises específicas
-    """
-    return guia
 
 def main():
     st.title('Análise Curva ABC')
@@ -430,7 +370,7 @@ def main():
             with tab2:
                 st.dataframe(df_processado)
             
-            # Aba 3: Filtros (mantida como está)
+            # Aba 3: Filtros
             with tab3:
                 col1, col2 = st.columns(2)
                 with col1:
@@ -467,7 +407,7 @@ def main():
                 df_filtrado = df_processado[mask]
                 st.dataframe(df_filtrado)
 
-            # Aba 4: Relatório (Nova)
+            # Aba 4: Relatório
             with tab4:
                 st.subheader('Relatório Completo')
                 
