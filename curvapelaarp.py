@@ -5,13 +5,9 @@ import plotly.graph_objects as go
 import numpy as np
 import io
 from datetime import datetime
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from fpdf import FPDF
 import base64
 from io import BytesIO
-import matplotlib.pyplot as plt
 
 # Configuração da página
 st.set_page_config(page_title="Análise Curva ABC", layout="wide")
@@ -58,18 +54,93 @@ def carregar_dados(uploaded_file):
         raise Exception(f"Erro ao carregar arquivo: {str(e)}")
 
 def gerar_pdf(df_processado, fig_pareto, fig_pizza, resumo):
-    """Gera relatório PDF com análises"""
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter)
-    styles = getSampleStyleSheet()
-    story = []
+    """Gera relatório PDF com análises usando FPDF"""
+    class PDF(FPDF):
+        def header(self):
+            self.set_font('Arial', 'B', 15)
+            self.cell(0, 10, 'Relatório de Análise Curva ABC', 0, 1, 'C')
+            self.ln(10)
+        
+        def footer(self):
+            self.set_y(-15)
+            self.set_font('Arial', 'I', 8)
+            self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
+
+    pdf = PDF()
+    pdf.add_page()
     
-    # Título
-    title_style = ParagraphStyle(
-        'CustomTitle',
-        parent=styles['Heading1'],
-        fontSize=24,
-        spaceAfter=30
+    # Sumário Executivo
+    pdf.set_font('Arial', 'B', 12)
+    pdf.cell(0, 10, 'Sumário Executivo', 0, 1)
+    pdf.set_font('Arial', '', 10)
+    
+    total_itens = len(df_processado)
+    total_valor = df_processado['TOTAL'].sum()
+    
+    pdf.multi_cell(0, 10, 
+        f'Esta análise contempla {total_itens} itens, totalizando {formatar_moeda_real(total_valor)}. '
+        'Os itens foram classificados em três categorias (A, B e C) de acordo com sua representatividade financeira.')
+    
+    # Salvar gráficos como imagens
+    # Pareto
+    pdf.add_page()
+    pdf.set_font('Arial', 'B', 12)
+    pdf.cell(0, 10, 'Análise de Pareto', 0, 1)
+    
+    pareto_img = BytesIO()
+    fig_pareto.write_image(pareto_img, format='png', width=800, height=400)
+    pdf.image(pareto_img, x=10, y=30, w=190)
+    
+    # Pizza
+    pdf.add_page()
+    pdf.set_font('Arial', 'B', 12)
+    pdf.cell(0, 10, 'Distribuição por Classe', 0, 1)
+    
+    pizza_img = BytesIO()
+    fig_pizza.write_image(pizza_img, format='png', width=800, height=400)
+    pdf.image(pizza_img, x=10, y=30, w=190)
+    
+    # Resumo em tabela
+    pdf.add_page()
+    pdf.set_font('Arial', 'B', 12)
+    pdf.cell(0, 10, 'Resumo por Classe', 0, 1)
+    
+    # Cabeçalho da tabela
+    col_width = 47
+    pdf.set_font('Arial', 'B', 10)
+    pdf.cell(col_width, 10, 'Classe', 1)
+    pdf.cell(col_width, 10, 'Qtd Itens', 1)
+    pdf.cell(col_width, 10, 'Valor Total', 1)
+    pdf.cell(col_width, 10, 'Valor Médio', 1)
+    pdf.ln()
+    
+    # Dados da tabela
+    pdf.set_font('Arial', '', 10)
+    for idx, row in resumo.iterrows():
+        pdf.cell(col_width, 10, str(idx), 1)
+        pdf.cell(col_width, 10, str(row['Quantidade de Itens']), 1)
+        pdf.cell(col_width, 10, str(row['Valor Total']), 1)
+        pdf.cell(col_width, 10, str(row['Valor Médio']), 1)
+        pdf.ln()
+    
+    # Recomendações
+    pdf.add_page()
+    pdf.set_font('Arial', 'B', 12)
+    pdf.cell(0, 10, 'Recomendações', 0, 1)
+    pdf.set_font('Arial', '', 10)
+    
+    recomendacoes = [
+        f"1. Foco em itens classe A: Priorizar a gestão dos {len(df_processado[df_processado['CLASSIFICAÇÃO']=='A'])} itens que representam 80% do valor total.",
+        "2. Revisão periódica: Estabelecer ciclos de revisão trimestral para itens classe A.",
+        "3. Otimização de estoques: Adequar políticas de estoque de acordo com a classificação."
+    ]
+    
+    for rec in recomendacoes:
+        pdf.multi_cell(0, 10, rec)
+    
+    # Salvar PDF
+    return BytesIO(pdf.output(dest='S').encode('latin1'))
+    
     )
     story.append(Paragraph("Relatório de Análise Curva ABC", title_style))
     
